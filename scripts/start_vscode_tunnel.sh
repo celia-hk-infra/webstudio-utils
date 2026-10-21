@@ -98,6 +98,9 @@ if [[ "${1:-}" == --install-only ]]; then
   exit 0
 fi
 
+# Restore persistent agent homes and pass their environment to VS Code.
+source "$(dirname -- "${BASH_SOURCE[0]}")/../shell/init.sh"
+
 # Metadata and server installations stay on local disk. Sign in again if wiped.
 echo 'Starting tunnel. Follow the license and sign-in prompts; Ctrl+C stops it.'
 exec "$CLI" tunnel --cli-data-dir "$LOCAL_DIR/cli-data" \
