@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Source this once in the shell that starts your editor/tunnel:
-#   source /home/ma-user/work/webstudio-utils/shell/init.sh
+#   source /path/to/webstudio-utils/shell/init.sh
+# Replace /path/to with the directory containing your clone.
 # Source it directly in JupyterLab terminals that skip Bash startup files.
 # Run it again after a container restart to restore links in the temporary home.
 
