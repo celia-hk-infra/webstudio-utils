@@ -23,7 +23,7 @@ fi
 chmod 700 -- "$WEBSTUDIO_AGENT_STATE_DIR" || return 1
 if [[ $(stat -c %a -- "$WEBSTUDIO_AGENT_STATE_DIR") != 700 ]]; then
     printf 'Agent home must have mode 700: %s\n' "$WEBSTUDIO_AGENT_STATE_DIR" >&2
-    printf '%s\n' 'This filesystem did not preserve chmod 700. Use a persistent mount that supports Unix permissions (such as gabriel-sfs).' >&2
+    printf '%s\n' 'This filesystem did not preserve chmod 700. Use a persistent mount that supports Unix permissions.' >&2
     printf '%s\n' 'Check WEBSTUDIO_PERSIST_ROOT and WEBSTUDIO_AGENT_STATE_DIR for overrides pointing at an old mount.' >&2
     return 1
 fi
