@@ -5,19 +5,27 @@ set -euo pipefail
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 codex_version=${WEBSTUDIO_CODEX_VERSION:-0.166.0}
 gh_version=${WEBSTUDIO_GH_VERSION:-2.103.3}
+claude_version=${WEBSTUDIO_CLAUDE_VERSION:-2.1.322}
+npm_registry=${WEBSTUDIO_NPM_REGISTRY:-https://registry.npmmirror.com}
+agents=
+selection_explicit=0
+skip_claude=0
 skip_codex=0
 skip_vscode=0
 tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--skip-codex] [--skip-vscode]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode]
 
-Prepare persistent Codex state and tools, stage Codex on local disk, and install
+Choose agents interactively (default: both without a terminal).
+Prepare persistent agent state and tools, stage CLIs on local disk, and install
 the VS Code tunnel CLI. Start the tunnel separately with:
   ./scripts/start_vscode_tunnel.sh
 
 Set WEBSTUDIO_CODEX_VERSION to pin a different Codex CLI version.
+Set WEBSTUDIO_CLAUDE_VERSION to pin Claude Code (default: 2.1.322).
+Set WEBSTUDIO_NPM_REGISTRY to override https://registry.npmmirror.com.
 Set WEBSTUDIO_GH_VERSION to pin a different GitHub CLI version.
 Set WEBSTUDIO_PERSIST_ROOT and WEBSTUDIO_LOCAL_DIR to override storage locations.
 EOF
@@ -30,12 +38,43 @@ while (($#)); do
       tunnel_name=$2
       shift 2
       ;;
-    --skip-codex) skip_codex=1; shift ;;
+    --agents)
+      (($# >= 2)) || { echo 'Missing value for --agents' >&2; exit 2; }
+      agents=$2; selection_explicit=1; shift 2 ;;
+    --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
+    --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -n $agents ]]; then
+  case $agents in
+    codex) skip_claude=1 ;;
+    claude) skip_codex=1 ;;
+    both) ;;
+    none) skip_codex=1; skip_claude=1 ;;
+    *) echo '--agents must be codex, claude, both, or none.' >&2; exit 2 ;;
+  esac
+elif (( ! selection_explicit )) && [[ -t 0 ]]; then
+  while :; do
+    codex_mark=x; claude_mark=x
+    (( skip_codex )) && codex_mark=' '
+    (( skip_claude )) && claude_mark=' '
+    printf '\nChoose agents:\n  1 [%s] Codex\n  2 [%s] Claude Code\n' "$codex_mark" "$claude_mark"
+    read -r -p 'Type 1 or 2 to toggle; Enter to install selected agents: ' choice || exit 2
+    case $choice in
+      1) skip_codex=$((1 - skip_codex)) ;;
+      2) skip_claude=$((1 - skip_claude)) ;;
+      '') break ;;
+      *) echo 'Choose 1, 2, or Enter.' ;;
+    esac
+  done
+fi
+[[ $claude_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+  echo 'WEBSTUDIO_CLAUDE_VERSION must be a numeric release.' >&2; exit 2
+}
 
 [[ $codex_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo 'WEBSTUDIO_CODEX_VERSION must be a numeric release, such as 0.166.0.' >&2
@@ -117,52 +156,58 @@ fi
 printf '%s\n' "$tunnel_name" > "$tunnel_dir/name"
 chmod 600 -- "$tunnel_dir/name"
 
-if (( ! skip_codex )); then
-  command -v npm >/dev/null || { echo 'npm is required to install Codex.' >&2; exit 1; }
-  command -v node >/dev/null || { echo 'node is required to run Codex.' >&2; exit 1; }
-  codex_root="$WEBSTUDIO_PERSIST_ROOT/tools/codex"
-  codex_cache="$codex_root/$codex_version"
-  mkdir -p -- "$codex_root" "$WEBSTUDIO_PERSIST_ROOT/cache/npm"
-  if [[ ! -x $codex_cache/node_modules/.bin/codex ]]; then
-    install_stage=$(mktemp -d "$codex_root/.install.XXXXXX")
-    echo "Installing @openai/codex@$codex_version to persistent cache..."
-    if ! npm_config_cache="$WEBSTUDIO_PERSIST_ROOT/cache/npm" npm install \
+install_agent() {
+  local agent_name=$1 agent_package=$2 agent_version=$3 agent_label=$4
+  local agent_root agent_cache install_stage local_agent_root local_agent local_stage
+  command -v npm >/dev/null || { echo "npm is required to install ${agent_label}." >&2; exit 1; }
+  command -v node >/dev/null || { echo "node is required to run ${agent_label}." >&2; exit 1; }
+  agent_root="$WEBSTUDIO_PERSIST_ROOT/tools/$agent_name"
+  agent_cache="$agent_root/$agent_version"
+  mkdir -p -- "$agent_root" "$WEBSTUDIO_PERSIST_ROOT/cache/npm"
+  if [[ ! -x $agent_cache/node_modules/.bin/$agent_name ]]; then
+    install_stage=$(mktemp -d "$agent_root/.install.XXXXXX")
+    echo "Installing ${agent_package}@$agent_version to persistent cache..."
+    if ! npm_config_cache="$WEBSTUDIO_PERSIST_ROOT/cache/npm" npm install --registry "$npm_registry" \
       --prefix "$install_stage" --no-save --no-audit --no-fund \
-      "@openai/codex@$codex_version"; then
+      "${agent_package}@$agent_version"; then
       rm -rf -- "$install_stage"
       exit 1
     fi
-    if [[ ! -x $install_stage/node_modules/.bin/codex ]]; then
+    if [[ ! -x $install_stage/node_modules/.bin/$agent_name ]]; then
       rm -rf -- "$install_stage"
-      echo 'Codex install did not produce a CLI.' >&2
+      echo "${agent_label} install did not produce a CLI." >&2
       exit 1
     fi
-    if [[ -e $codex_cache ]]; then
-      echo "Incomplete Codex cache at $codex_cache; move it aside and rerun." >&2
+    if [[ -e $agent_cache ]]; then
+      echo "Incomplete ${agent_label} cache at $agent_cache; move it aside and rerun." >&2
       exit 1
     fi
-    mv -- "$install_stage" "$codex_cache"
+    mv -- "$install_stage" "$agent_cache"
   fi
 
-  local_codex_root="$WEBSTUDIO_LOCAL_DIR/codex"
-  local_codex="$local_codex_root/$codex_version"
-  mkdir -p -- "$local_codex_root"
-  if [[ ! -x $local_codex/node_modules/.bin/codex ]]; then
-    local_stage=$(mktemp -d "$local_codex_root/.stage.XXXXXX")
-    echo 'Copying Codex CLI from persistent storage to local disk...'
-    cp -a -- "$codex_cache/node_modules" "$local_stage/"
-    if [[ ! -x $local_stage/node_modules/.bin/codex ]]; then
+  local_agent_root="$WEBSTUDIO_LOCAL_DIR/$agent_name"
+  local_agent="$local_agent_root/$agent_version"
+  mkdir -p -- "$local_agent_root"
+  if [[ ! -x $local_agent/node_modules/.bin/$agent_name ]]; then
+    local_stage=$(mktemp -d "$local_agent_root/.stage.XXXXXX")
+    echo "Copying ${agent_label} CLI from persistent storage to local disk..."
+    cp -a -- "$agent_cache/node_modules" "$local_stage/"
+    if [[ ! -x $local_stage/node_modules/.bin/$agent_name ]]; then
       rm -rf -- "$local_stage"
-      echo 'Local Codex copy is incomplete.' >&2
+      echo "Local ${agent_label} copy is incomplete." >&2
       exit 1
     fi
-    if [[ -e $local_codex ]]; then
-      echo "Incomplete local Codex copy at $local_codex; move it aside and rerun." >&2
+    if [[ -e $local_agent ]]; then
+      echo "Incomplete local ${agent_label} copy at $local_agent; move it aside and rerun." >&2
       exit 1
     fi
-    mv -- "$local_stage" "$local_codex"
+    mv -- "$local_stage" "$local_agent"
   fi
-  ln -sfnT -- "$local_codex/node_modules/.bin/codex" "$WEBSTUDIO_LOCAL_DIR/bin/codex"
+  ln -sfnT -- "$local_agent/node_modules/.bin/$agent_name" "$WEBSTUDIO_LOCAL_DIR/bin/$agent_name"
+}
+
+if (( ! skip_codex )); then
+  install_agent codex "@openai/codex" "$codex_version" Codex
   # Keep this setting at TOML's top level, before any table headers.
   codex_config="$CODEX_HOME/config.toml"
   config_stage=$(mktemp "${codex_config%/*}/.config.XXXXXX")
@@ -184,6 +229,12 @@ if (( ! skip_codex )); then
   echo "Codex ready: $WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 
+if (( ! skip_claude )); then
+  install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
+  node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json"
+  echo "Claude Code ready: $WEBSTUDIO_LOCAL_DIR/bin/claude"
+fi
+
 if (( ! skip_vscode )); then
   "$repo_dir/scripts/start_vscode_tunnel.sh" --install-only
 fi
@@ -191,4 +242,4 @@ fi
 printf 'Persistent state: %s\nTunnel name: %s\n' "$WEBSTUDIO_PERSIST_ROOT" "$tunnel_name"
 printf 'For this shell: source %q\n' "$repo_dir/shell/init.sh"
 printf 'To start VS Code: %q\n' "$repo_dir/scripts/start_vscode_tunnel.sh"
-echo 'To reopen a saved Codex session: codex resume'
+echo 'Configure your OpenLux API key, then run codex or claude for the agents you selected.'
