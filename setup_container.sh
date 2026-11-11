@@ -86,7 +86,7 @@ fi
 }
 
 persist_root=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$repo_dir/.." && pwd -P)}
-source "$repo_dir/shell/init.sh"
+WEBSTUDIO_REPORT_LINK_CONFLICTS=1 source "$repo_dir/shell/init.sh"
 mkdir -p -- "$WEBSTUDIO_LOCAL_DIR/bin"
 chmod 700 -- "$WEBSTUDIO_LOCAL_DIR"
 

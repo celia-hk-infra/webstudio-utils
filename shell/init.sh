@@ -29,9 +29,19 @@ if [[ $(stat -c %a -- "$WEBSTUDIO_AGENT_STATE_DIR") != 700 ]]; then
 fi
 
 _webstudio_restore_link() {
-    local target=$1 link=$2
+    local target=$1 link=$2 previous
+    # Repair broken links left by a moved/deleted Webstudio state directory.
+    # Real directories and links to unrelated locations remain untouched.
+    if [[ -L $link && ! -e $link ]]; then
+        previous=$(readlink -- "$link")
+        if [[ $previous == */.webstudio-agent-home/"${link##*/}" ]]; then
+            ln -sfnT -- "$target" "$link" || return 1
+            return 0
+        fi
+    fi
     if [[ -e $link || -L $link ]]; then
-        if [[ ! -L $link || $(readlink -- "$link") != "$target" ]]; then
+        if [[ ${WEBSTUDIO_REPORT_LINK_CONFLICTS:-0} == 1 ]] &&
+            [[ ! -L $link || $(readlink -- "$link") != "$target" ]]; then
             printf 'Keeping existing %s; migrate it to %s before removing it.\n' "$link" "$target" >&2
         fi
     else
