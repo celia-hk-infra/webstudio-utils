@@ -10,9 +10,11 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     exit 2
 fi
 
-# Store private agent state beside the cloned repository, outside Git.
+# Store private agent state on the mount containing this repository, outside Git.
 _webstudio_shell_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")") || return 1
-WEBSTUDIO_AGENT_STATE_DIR=${WEBSTUDIO_AGENT_STATE_DIR:-$(cd -- "$_webstudio_shell_dir/../.." && pwd -P)/.webstudio-agent-home}
+WEBSTUDIO_PERSIST_ROOT=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$_webstudio_shell_dir/../.." && pwd -P)}
+export WEBSTUDIO_PERSIST_ROOT
+WEBSTUDIO_AGENT_STATE_DIR=${WEBSTUDIO_AGENT_STATE_DIR:-$WEBSTUDIO_PERSIST_ROOT/.webstudio-agent-home}
 export WEBSTUDIO_AGENT_STATE_DIR
 if ! mkdir -p -m 700 -- "$WEBSTUDIO_AGENT_STATE_DIR"; then
     printf 'Could not create persistent agent directory: %s\n' "$WEBSTUDIO_AGENT_STATE_DIR" >&2
@@ -48,6 +50,22 @@ unset _webstudio_shell_dir
 # Override a CODEX_HOME inherited from the disposable container home.
 export CODEX_HOME="$WEBSTUDIO_AGENT_STATE_DIR/.codex"
 
+# Keep GitHub CLI credentials on the persistent mount.
+export GH_CONFIG_DIR="$WEBSTUDIO_AGENT_STATE_DIR/gh"
+mkdir -p -m 700 -- "$GH_CONFIG_DIR" || return 1
+chmod 700 -- "$GH_CONFIG_DIR" || return 1
+_webstudio_gh_bin="$WEBSTUDIO_PERSIST_ROOT/tools/gh/current/bin"
+if [[ -x "$_webstudio_gh_bin/gh" ]]; then
+    case ":$PATH:" in
+        *":$_webstudio_gh_bin:"*) ;;
+        *) export PATH="$_webstudio_gh_bin:$PATH" ;;
+    esac
+fi
+unset _webstudio_gh_bin
+
+# /etc/profile sets TMOUT=300, which closes an idle interactive Bash shell.
+unset TMOUT
+
 # Global npm CLI installs made with `npm install -g` also survive restarts.
 export npm_config_prefix="$WEBSTUDIO_AGENT_STATE_DIR/npm"
 mkdir -p -m 700 -- "$npm_config_prefix/bin" || return 1
@@ -55,3 +73,15 @@ case ":$PATH:" in
     *":$npm_config_prefix/bin:"*) ;;
     *) export PATH="$npm_config_prefix/bin:$PATH" ;;
 esac
+
+# setup_container.sh stages Codex locally for faster startup.
+WEBSTUDIO_LOCAL_DIR=${WEBSTUDIO_LOCAL_DIR:-/tmp/webstudio-${UID}}
+export WEBSTUDIO_LOCAL_DIR
+_webstudio_project_bin="$WEBSTUDIO_LOCAL_DIR/bin"
+if [[ -x "$_webstudio_project_bin/codex" ]]; then
+    case ":$PATH:" in
+        *":$_webstudio_project_bin:"*) ;;
+        *) export PATH="$_webstudio_project_bin:$PATH" ;;
+    esac
+fi
+unset _webstudio_project_bin
