@@ -1,0 +1,10 @@
+# Jupyter auto-saved checkpoints
+.ipynb_checkpoints/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local staging and editor noise
+*.swp
+.DS_Store
