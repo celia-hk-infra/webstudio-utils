@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run once after a new container starts. Safe to rerun in the same container.
 set -euo pipefail
+# Do not expose credentials when invoked with bash -x or bash -v.
+set +xv
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 codex_version=${WEBSTUDIO_CODEX_VERSION:-0.166.0}
@@ -18,7 +20,10 @@ usage() {
   cat <<'EOF'
 Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode]
 
-Choose agents interactively (default: both without a terminal).
+Choose agents with Up/Down, Space to toggle, and Enter to continue.
+Then enter your OpenLux API key once for the selected agents.
+Without a terminal, selection defaults to both; supply OPENLUX_API_KEY unless
+all selected agents already have saved credentials.
 Prepare persistent agent state and tools, stage CLIs on local disk, and install
 the VS Code tunnel CLI. Start the tunnel separately with:
   ./scripts/start_vscode_tunnel.sh
@@ -58,19 +63,8 @@ if [[ -n $agents ]]; then
     *) echo '--agents must be codex, claude, both, or none.' >&2; exit 2 ;;
   esac
 elif (( ! selection_explicit )) && [[ -t 0 ]]; then
-  while :; do
-    codex_mark=x; claude_mark=x
-    (( skip_codex )) && codex_mark=' '
-    (( skip_claude )) && claude_mark=' '
-    printf '\nChoose agents:\n  1 [%s] Codex\n  2 [%s] Claude Code\n' "$codex_mark" "$claude_mark"
-    read -r -p 'Type 1 or 2 to toggle; Enter to install selected agents: ' choice || exit 2
-    case $choice in
-      1) skip_codex=$((1 - skip_codex)) ;;
-      2) skip_claude=$((1 - skip_claude)) ;;
-      '') break ;;
-      *) echo 'Choose 1, 2, or Enter.' ;;
-    esac
-  done
+  source "$repo_dir/scripts/setup_prompts.sh"
+  choose_agents
 fi
 [[ $claude_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo 'WEBSTUDIO_CLAUDE_VERSION must be a numeric release.' >&2; exit 2
@@ -87,6 +81,16 @@ fi
 
 persist_root=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$repo_dir/.." && pwd -P)}
 WEBSTUDIO_REPORT_LINK_CONFLICTS=1 source "$repo_dir/shell/init.sh"
+setup_api_key=
+export -n setup_api_key
+if (( ! skip_codex || ! skip_claude )); then
+  command -v node >/dev/null || { echo 'node is required to configure agents.' >&2; exit 1; }
+  saved_auth=$(node "$repo_dir/scripts/has_saved_agent_auth.cjs" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$skip_codex" "$skip_claude")
+  source "$repo_dir/scripts/setup_prompts.sh"
+  prompt_openlux_key "$saved_auth"
+fi
+# Keep the key in a non-exported shell variable until it is piped to each CLI.
+unset OPENLUX_API_KEY
 mkdir -p -- "$WEBSTUDIO_LOCAL_DIR/bin"
 chmod 700 -- "$WEBSTUDIO_LOCAL_DIR"
 
@@ -212,9 +216,13 @@ if (( ! skip_codex )); then
   codex_config="$CODEX_HOME/config.toml"
   config_stage=$(mktemp "${codex_config%/*}/.config.XXXXXX")
   awk '
-    BEGIN { print "openai_base_url = \"https://api.openlux.ai/v1\"" }
+    BEGIN {
+      print "openai_base_url = \"https://api.openlux.ai/v1\""
+      print "cli_auth_credentials_store = \"file\""
+    }
     /^[[:space:]]*\[/ { in_table = 1 }
     !in_table && /^[[:space:]]*openai_base_url[[:space:]]*=/ { next }
+    !in_table && /^[[:space:]]*cli_auth_credentials_store[[:space:]]*=/ { next }
     { print }
   ' "$codex_config" > "$config_stage" 2>/dev/null || {
     if [[ -e $codex_config ]]; then
@@ -226,14 +234,19 @@ if (( ! skip_codex )); then
   cat -- "$config_stage" > "$codex_config"
   chmod 600 -- "$codex_config"
   rm -f -- "$config_stage"
+  if [[ -n $setup_api_key ]]; then
+    printf '%s' "$setup_api_key" | "$WEBSTUDIO_LOCAL_DIR/bin/codex" login --with-api-key
+  fi
+  chmod 600 -- "$CODEX_HOME/auth.json"
   echo "Codex ready: $WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 
 if (( ! skip_claude )); then
   install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
-  node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json"
+  printf '%s' "$setup_api_key" | node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json" --key-stdin
   echo "Claude Code ready: $WEBSTUDIO_LOCAL_DIR/bin/claude"
 fi
+unset setup_api_key
 
 if (( ! skip_vscode )); then
   "$repo_dir/scripts/start_vscode_tunnel.sh" --install-only
@@ -242,4 +255,4 @@ fi
 printf 'Persistent state: %s\nTunnel name: %s\n' "$WEBSTUDIO_PERSIST_ROOT" "$tunnel_name"
 printf 'For this shell: source %q\n' "$repo_dir/shell/init.sh"
 printf 'To start VS Code: %q\n' "$repo_dir/scripts/start_vscode_tunnel.sh"
-echo 'Configure your OpenLux API key, then run codex or claude for the agents you selected.'
+echo 'Selected agents are configured. Load shell/init.sh in this terminal, then run codex or claude.'
