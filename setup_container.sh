@@ -47,12 +47,6 @@ done
 }
 
 persist_root=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$repo_dir/.." && pwd -P)}
-mount_type=$(findmnt -n -o FSTYPE -T "$persist_root" 2>/dev/null || true)
-if [[ $mount_type == fuse.obsfs || $mount_type == overlay || -z $mount_type ]]; then
-  printf 'Persistent root %s is on %s, not the NFS mount. Run the copy in gabriel-mlops.\n' \
-    "$persist_root" "${mount_type:-an unknown filesystem}" >&2
-  exit 1
-fi
 source "$repo_dir/shell/init.sh"
 mkdir -p -- "$WEBSTUDIO_LOCAL_DIR/bin"
 chmod 700 -- "$WEBSTUDIO_LOCAL_DIR"
@@ -131,7 +125,7 @@ if (( ! skip_codex )); then
   mkdir -p -- "$codex_root" "$WEBSTUDIO_PERSIST_ROOT/cache/npm"
   if [[ ! -x $codex_cache/node_modules/.bin/codex ]]; then
     install_stage=$(mktemp -d "$codex_root/.install.XXXXXX")
-    echo "Installing @openai/codex@$codex_version to NFS cache..."
+    echo "Installing @openai/codex@$codex_version to persistent cache..."
     if ! npm_config_cache="$WEBSTUDIO_PERSIST_ROOT/cache/npm" npm install \
       --prefix "$install_stage" --no-save --no-audit --no-fund \
       "@openai/codex@$codex_version"; then
@@ -155,7 +149,7 @@ if (( ! skip_codex )); then
   mkdir -p -- "$local_codex_root"
   if [[ ! -x $local_codex/node_modules/.bin/codex ]]; then
     local_stage=$(mktemp -d "$local_codex_root/.stage.XXXXXX")
-    echo 'Copying Codex CLI from NFS to local disk...'
+    echo 'Copying Codex CLI from persistent storage to local disk...'
     cp -a -- "$codex_cache/node_modules" "$local_stage/"
     if [[ ! -x $local_stage/node_modules/.bin/codex ]]; then
       rm -rf -- "$local_stage"
@@ -169,6 +163,24 @@ if (( ! skip_codex )); then
     mv -- "$local_stage" "$local_codex"
   fi
   ln -sfnT -- "$local_codex/node_modules/.bin/codex" "$WEBSTUDIO_LOCAL_DIR/bin/codex"
+  # Keep this setting at TOML's top level, before any table headers.
+  codex_config="$CODEX_HOME/config.toml"
+  config_stage=$(mktemp "${codex_config%/*}/.config.XXXXXX")
+  awk '
+    BEGIN { print "openai_base_url = \"https://api.openlux.ai/v1\"" }
+    /^[[:space:]]*\[/ { in_table = 1 }
+    !in_table && /^[[:space:]]*openai_base_url[[:space:]]*=/ { next }
+    { print }
+  ' "$codex_config" > "$config_stage" 2>/dev/null || {
+    if [[ -e $codex_config ]]; then
+      rm -f -- "$config_stage"
+      echo "Could not read Codex configuration: $codex_config" >&2
+      exit 1
+    fi
+  }
+  cat -- "$config_stage" > "$codex_config"
+  chmod 600 -- "$codex_config"
+  rm -f -- "$config_stage"
   echo "Codex ready: $WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 

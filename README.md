@@ -1,15 +1,13 @@
 # webstudio-utils
 
-Bootstrap a new WebStudio container from the persistent `gabriel-mlops` NFS
-mount. Keep this checkout at
-`/home/ma-user/work/dataset/gabriel-mlops/webstudio-utils`; the setup script
-uses the checkout's parent directory for persistent data. The old `gabriel`
-mount is `fuse.obsfs` and was much slower for small files in this environment.
+Bootstrap a new WebStudio container from a checkout on any filesystem. The setup
+script uses the checkout's parent directory for persistent data; set
+`WEBSTUDIO_PERSIST_ROOT` to use a different location.
 
 ## New container
 
 ```bash
-cd /home/ma-user/work/dataset/gabriel-mlops/webstudio-utils
+cd /path/to/webstudio-utils
 ./setup_container.sh --tunnel-name my-jupyter  # choose a name on the first run
 source shell/init.sh                         # for this terminal's environment
 codex resume                                 # or simply: codex
@@ -46,11 +44,15 @@ Tunnel names can be at most 20 letters, digits, or hyphens. Use
 
 Codex is pinned to version `0.166.0` in `setup_container.sh`. Set
 `WEBSTUDIO_CODEX_VERSION` for an intentional upgrade. The first setup downloads
-the package to NFS; each fresh container copies it to local disk. The VS Code
-CLI download is also cached on NFS, then extracted locally. The Conda runtime
+the package to persistent storage; each fresh container copies it to local disk. The VS Code
+CLI download is also cached on persistent storage, then extracted locally. The Conda runtime
 for the VS Code server stays on NFS. The script needs `node`, `npm`, `conda`,
 `curl`, and `tar` in the container; the tunnel launcher checks its platform
 requirements.
+
+After installing Codex, setup sets top-level `openai_base_url` in
+`$CODEX_HOME/config.toml` to `"https://api.openlux.ai/v1"`, preserving other
+settings. Rerunning setup reapplies this URL; `--skip-codex` skips it.
 
 GitHub CLI is pinned to version `2.103.3`. The setup verifies the official
 release checksum and installs it under `tools/gh`; `shell/init.sh` puts it on
@@ -59,7 +61,7 @@ with `gh auth login`; later shells and containers reuse that login.
 
 `shell/init.sh` links the persistent agent directories and `shell/.bash_profile`
 into `$HOME` when those paths are absent. It leaves existing home files in place
-and reports any conflicts. It sets `CODEX_HOME` to the NFS directory, clears
+and reports any conflicts. It sets `CODEX_HOME` to the persistent directory, clears
 the container's Bash `TMOUT`, and puts the staged Codex CLI on `PATH`. Source it
 again in JupyterLab terminals that do not read the login profile. Set
 `WEBSTUDIO_PERSIST_ROOT`, `WEBSTUDIO_AGENT_STATE_DIR`, or `WEBSTUDIO_LOCAL_DIR`
