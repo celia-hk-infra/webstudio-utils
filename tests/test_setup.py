@@ -71,12 +71,13 @@ class SetupTests(unittest.TestCase):
         self.persist = self.root / 'persist'
         self.state = self.persist / '.webstudio-agent-home'
         self.local = self.root / 'local'
+        self.tunnel = self.root / 'container-work/.webstudio-tunnel'
         self.home = self.root / 'home'
         self.home.mkdir()
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_', 'GH_', 'GITHUB_'))}
+                    if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_', 'GH_', 'GITHUB_', 'VSCODE_'))}
         self.env.update(HOME=str(self.home), WEBSTUDIO_PERSIST_ROOT=str(self.persist),
-                        WEBSTUDIO_LOCAL_DIR=str(self.local), TERM='xterm')
+                        WEBSTUDIO_LOCAL_DIR=str(self.local), WEBSTUDIO_TUNNEL_DIR=str(self.tunnel), TERM='xterm')
         self.executable(self.persist / 'tools/tmux/bin/tmux', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/gh/2.103.3/bin/gh', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/claude/2.1.322/node_modules/.bin/claude', '#!/bin/sh\nexit 0\n')
@@ -97,7 +98,7 @@ p.write_text(json.dumps({'auth_mode':'apikey', 'OPENAI_API_KEY':sys.stdin.read()
         env = self.env.copy()
         if key is not None:
             env['OPENLUX_API_KEY'] = key
-        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', agents, '--skip-vscode', provider],
+        result = subprocess.run(['bash', str(ROOT / 'setup_tools.sh'), '--agents', agents, '--skip-vscode', provider],
                                 env=env, capture_output=True, text=True)
         self.assertNotIn(KEY, result.stdout + result.stderr)
         if success:
@@ -131,7 +132,7 @@ if args[:2] == ['auth', 'setup-git']:
 
     def test_github_login_survives_new_home(self):
         self.mock_github_auth()
-        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents none --skip-vscode')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
         terminal.expect('GitHub authentication ready')
@@ -147,14 +148,14 @@ if args[:2] == ['auth', 'setup-git']:
         self.assertEqual(calls.count('auth login'), 1)
         self.assertEqual(calls.count('auth setup-git'), 2)
         self.assertTrue((replacement / '.gitconfig').exists())
-        self.assertTrue((self.local / '.setup-complete').exists())
+        self.assertTrue((self.state / '.setup-complete').exists())
 
     def test_github_unattended_requires_auth_or_explicit_skip(self):
         self.mock_github_auth()
         result = self.run_setup(agents='none', key=None, success=False)
         self.assertIn('GitHub login required', result.stderr)
         self.assertNotIn('auth login', (self.state / 'gh/calls').read_text())
-        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none',
+        result = subprocess.run(['bash', str(ROOT / 'setup_tools.sh'), '--agents', 'none',
                                  '--skip-vscode', '--skip-gh-auth'], env=self.env, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.env['GH_TOKEN'] = 'test-github-token'
@@ -165,18 +166,18 @@ if args[:2] == ['auth', 'setup-git']:
     def test_github_login_failure_stops_setup(self):
         self.mock_github_auth()
         self.env['TEST_GH_LOGIN_FAIL'] = '1'
-        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents none --skip-vscode')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
         terminal.expect('Sign in to GitHub.')
         self.assertNotEqual(terminal.finish(), 0)
         self.assertFalse((self.home / '.gitconfig').exists())
-        self.assertFalse((self.local / '.setup-complete').exists())
+        self.assertFalse((self.state / '.setup-complete').exists())
 
     def test_optional_tools_none_skips_install_and_auth(self):
         shutil.rmtree(self.persist / 'tools/tmux')
         shutil.rmtree(self.persist / 'tools/gh')
-        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents none --skip-vscode')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'a\r')
         terminal.expect('Setup complete')
@@ -192,7 +193,7 @@ if args[:2] == ['auth', 'setup-git']:
             (['--tools', 'tmux'], False, True),
             (['--skip-gh', '--skip-tmux'], False, False),
         ]:
-            result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none',
+            result = subprocess.run(['bash', str(ROOT / 'setup_tools.sh'), '--agents', 'none',
                                      '--skip-vscode', *flags], env=self.env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual('GitHub CLI' in result.stdout, gh_selected)
@@ -220,7 +221,7 @@ binary.chmod(0o700)
 
     def test_init_decline_and_noninteractive_guidance(self):
         terminal = self.terminal(f'source "{ROOT}/shell/init.sh"; echo SHELL_ALIVE')
-        terminal.expect('Run container setup now?')
+        terminal.expect('Run tools setup now?')
         terminal.send(b'n\r')
         terminal.expect('SHELL_ALIVE')
         self.assertEqual(terminal.finish(), 0)
@@ -228,13 +229,13 @@ binary.chmod(0o700)
         result = subprocess.run(['bash', '-c', f'source "{ROOT}/shell/init.sh"'],
                                 env=self.env, text=True, capture_output=True)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn('setup_container.sh', result.stderr)
+        self.assertIn('setup_tools.sh', result.stderr)
 
     def test_tunnel_prompt_and_init_accept(self):
         repo = self.mock_tunnel_repo()
         self.env['OPENLUX_API_KEY'] = KEY
         terminal = self.terminal(f'source "{repo}/shell/init.sh"; printf "LOADED:%s" "$CODEX_HOME"')
-        terminal.expect('Run container setup now?')
+        terminal.expect('Run tools setup now?')
         terminal.send(b'y\r')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
@@ -250,9 +251,9 @@ binary.chmod(0o700)
         self.assertEqual(terminal.finish(), 0)
         calls = self.persist / 'tunnel-calls'
         self.assertEqual(calls.read_text().splitlines(), ['--install-only', '--background'])
-        self.assertTrue((self.local / '.setup-complete').exists())
-        self.assertEqual((self.persist / '.webstudio-tunnel/name').read_text(), 'webstudio-persist\n')
-        terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none')
+        self.assertTrue((self.state / '.setup-complete').exists())
+        self.assertRegex((self.tunnel / 'name').read_text(), r'^webstudio-[0-9a-f]{10}\n$')
+        terminal = self.terminal(f'bash "{repo}/setup_tools.sh" --agents none')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
         terminal.expect('VS Code tunnel name')
@@ -266,13 +267,13 @@ binary.chmod(0o700)
                                 (['--start-tunnel=foreground'], ['--install-only', 'started']),
                                 (['--no-start-tunnel'], ['--install-only'])]:
             calls.write_text('')
-            result = subprocess.run(['bash', str(repo / 'setup_container.sh'), '--agents', 'none', *flags],
+            result = subprocess.run(['bash', str(repo / 'setup_tools.sh'), '--agents', 'none', *flags],
                                     env=self.env, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(calls.read_text().splitlines(), expected)
-        (self.local / '.setup-complete').unlink()
+        (self.state / '.setup-complete').unlink()
         terminal = self.terminal(f'source "{repo}/shell/init.sh"')
-        terminal.expect('Run container setup now?')
+        terminal.expect('Run tools setup now?')
         terminal.send(b'n\r')
         self.assertEqual(terminal.finish(), 0)
 
@@ -299,7 +300,7 @@ binary.chmod(0o700)
         self.assertNotIn(b'UNEXPECTED', cancel.output)
 
     def test_interactive_setup_hides_key(self):
-        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --skip-vscode')
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --skip-vscode')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
         terminal.expect('Which optional tools should be installed?')
@@ -325,13 +326,13 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
         return repo
 
     def test_tunnel_name_prompt_validates_input(self):
-        name_file = self.persist / '.webstudio-tunnel/name'
+        name_file = self.tunnel / 'name'
         repo = self.mock_tunnel_repo()
-        terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none --no-start-tunnel')
+        terminal = self.terminal(f'bash "{repo}/setup_tools.sh" --agents none --no-start-tunnel')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
         terminal.expect('VS Code tunnel name')
-        terminal.expect('webstudio-persist')
+        terminal.expect('webstudio-')
         # Invalid characters are rejected, input stops at 20, and a leading hyphen cannot be submitted.
         terminal.send(b'-')
         terminal.send(b'\r')
@@ -342,7 +343,7 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
         terminal.expect('Setup complete')
         self.assertEqual(terminal.finish(), 0)
         self.assertEqual(name_file.read_text(), 'mybox' + 'x' * 15 + '\n')
-        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none', '--tunnel-name',
+        result = subprocess.run(['bash', str(ROOT / 'setup_tools.sh'), '--agents', 'none', '--tunnel-name',
                                  'a' * 21], env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn('up to 20 characters', result.stderr)
@@ -384,10 +385,11 @@ fi
 echo 'code 1.0.0'
 ''')
         self.env.update(VSCODE_INSTALL_DIR=str(vscode), VSCODE_LOCAL_DIR=str(vscode / 'local'))
-        (self.persist / '.webstudio-tunnel').mkdir(parents=True)
-        (self.persist / '.webstudio-tunnel/name').write_text('test-name\n')
+        self.tunnel.mkdir(parents=True)
+        self.env['WEBSTUDIO_TUNNEL_NAME'] = 'test-name'
         self.local.mkdir()
-        (self.local / '.setup-complete').write_text(f'{ROOT}\n')
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / '.setup-complete').write_text(f'{ROOT}\n')
         script = str(ROOT / 'scripts/start_vscode_tunnel.sh')
         terminal = self.terminal(f'cd "{self.root}" && bash "{script}" --background')
         terminal.expect('use code TEST-CODE')
@@ -419,6 +421,38 @@ echo 'code 1.0.0'
         for path in (codex, claude, claude.parent / '.claude.json'):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
+    def test_tunnel_identity_is_container_local(self):
+        self.run_setup(agents='none', key=None)
+        original = (self.tunnel / 'name').read_text()
+        other = self.root / 'other-container/.webstudio-tunnel'
+        env = dict(self.env, WEBSTUDIO_TUNNEL_DIR=str(other))
+        command = (f'source "{ROOT}/shell/init.sh" && '
+                   f'source "{ROOT}/scripts/tunnel_config.sh" && webstudio_ensure_tunnel_name')
+        result = subprocess.run(['bash', '-c', command], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(original, (other / 'name').read_text())
+        self.assertEqual(original, (self.tunnel / 'name').read_text())
+        self.assertFalse((self.persist / '.webstudio-tunnel').exists())
+        saved = (other / 'name').read_text()
+        subprocess.run(['bash', '-c', command], env=env, check=True, capture_output=True)
+        self.assertEqual(saved, (other / 'name').read_text())
+        env['WEBSTUDIO_TUNNEL_NAME'] = 'container-b'
+        subprocess.run(['bash', '-c', command], env=env, check=True, capture_output=True)
+        self.assertEqual((other / 'name').read_text(), 'container-b\n')
+
+    def test_replacement_container_only_needs_init(self):
+        self.run_setup()
+        shutil.rmtree(self.local)
+        shutil.rmtree(self.home)
+        self.home.mkdir()
+        result = subprocess.run(
+            ['bash', '-c', f'source "{ROOT}/shell/init.sh" && command -v codex && command -v claude'],
+            env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(str(self.state / 'bin/codex'), result.stdout)
+        self.assertTrue((self.home / '.codex').is_symlink())
+        self.assertFalse(self.local.exists())
+
     def test_both_and_rerun_preserve_preferences(self):
         self.run_setup()
         self.assert_credentials()
@@ -434,7 +468,7 @@ echo 'code 1.0.0'
         self.assertEqual(config.read_text().count('openai_base_url ='), 1)
         self.assertEqual(config.read_text().count('cli_auth_credentials_store ='), 1)
         self.assertIn('[projects."/example"]', config.read_text())
-        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents both --skip-vscode')
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents both --skip-vscode')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
         terminal.expect('Override official endpoints with OpenLux?')
@@ -496,8 +530,9 @@ echo 'code 1.0.0'
             )
         # Write the setup marker pointing at ROOT (the current clone).
         self.local.mkdir(parents=True, exist_ok=True)
-        (self.local / '.setup-complete').write_text(str(ROOT) + '\n')
-        (self.local / '.setup-complete').chmod(0o600)
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / '.setup-complete').write_text(str(ROOT) + '\n')
+        (self.state / '.setup-complete').chmod(0o600)
         # Sourcing init.sh should succeed and clean up the stale hook.
         result = subprocess.run(
             ['bash', '-c', f'source "{current}"; echo OK'],
@@ -516,8 +551,9 @@ echo 'code 1.0.0'
     def test_stale_hook_not_added_twice(self):
         """Running init.sh a second time does not duplicate the hook."""
         self.local.mkdir(parents=True, exist_ok=True)
-        (self.local / '.setup-complete').write_text(str(ROOT) + '\n')
-        (self.local / '.setup-complete').chmod(0o600)
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / '.setup-complete').write_text(str(ROOT) + '\n')
+        (self.state / '.setup-complete').chmod(0o600)
         current = str(ROOT / 'shell/init.sh')
         for _ in range(2):
             subprocess.run(

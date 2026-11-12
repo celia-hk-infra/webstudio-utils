@@ -4,7 +4,7 @@
 
 通过任意文件系统上的仓库副本，快速初始化新的 WebStudio 容器。安装脚本默认将仓库的父目录用于持久化数据；可通过 `WEBSTUDIO_PERSIST_ROOT` 指定其他位置。
 
-- [初始化新容器](#初始化新容器)
+- [首次安装工具](#首次安装工具)
 - [目录与文件存放位置](#目录与文件存放位置)
 - [选择智能体](#选择智能体)
 - [凭据与网关配置](#凭据与网关配置)
@@ -13,13 +13,19 @@
 - [故障排查](#故障排查)
 - [可用选项](#可用选项)
 
-## 初始化新容器
+## 首次安装工具
+
+默认将工具和状态安装到仓库的父目录（与仓库并列），建议使用 SFS。
+安装过程中和安装完成后会加载 `shell/init.sh`，设置路径、环境变量、
+主目录链接和 Bash 启动钩子。安装脚本运行在子进程中，因此还需在当前终端
+执行 `source shell/init.sh` 才能更新当前环境；后续 Bash 终端会自动加载。
+
 
 请将仓库放在支持保留 Unix 权限的持久化挂载目录中，例如 `/home/user/work/dataset/user-sfs/webstudio-utils`：
 
 ```bash
 cd /home/user/work/dataset/user-sfs/webstudio-utils
-./setup_container.sh --tunnel-name my-jupyter  # 首次运行时指定隧道名称
+./setup_tools.sh --tunnel-name my-jupyter  # 首次运行时指定隧道名称
 source shell/init.sh                           # 为当前终端加载环境
 codex resume                                   # 也可直接运行 codex
 ```
@@ -28,7 +34,7 @@ codex resume                                   # 也可直接运行 codex
 
 交互式安装会提示输入隧道名称（直接回车保留已保存或默认的名称），然后询问启动方式：后台运行（默认）、在当前终端运行，或暂不启动。后台选项会在名为 `vscode-tunnel` 的 tmux 会话中运行隧道，终端关闭后仍保持运行。使用 `--start-tunnel`（后台）或 `--start-tunnel=foreground` 可跳过询问直接选择，`--no-start-tunnel` 可跳过启动。无人值守运行默认不启动隧道，除非显式指定。`--skip-vscode` 会跳过隧道安装及启动询问，不能与 `--start-tunnel` 同时使用。
 
-安装脚本会保存隧道名称，后续容器直接运行 `./setup_container.sh` 即可，无需再传入 `--tunnel-name`。脚本可以安全地重复运行。
+安装脚本会保存隧道名称。后续容器只需加载 `shell/init.sh`，需要 VS Code 时再运行隧道启动脚本，无需重新安装。
 
 安装后可直接管理隧道：
 
@@ -39,9 +45,9 @@ codex resume                                   # 也可直接运行 codex
 ./scripts/start_vscode_tunnel.sh                # 在当前终端运行（Ctrl+C 停止）
 ```
 
-隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在持久化存储中保留隧道的 CLI 身份与登录数据，并复用已保存的名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
+隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在各容器自己的工作目录中保存隧道 CLI 身份、登录数据和名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
 
-隧道名称最多为 20 个字符，只能包含字母、数字或连字符。可运行 `./setup_container.sh --tunnel-name SHORT-NAME` 修改已保存的名称。
+隧道名称最多为 20 个字符，只能包含字母、数字或连字符。可运行 `./setup_tools.sh --tunnel-name SHORT-NAME` 修改已保存的名称。
 
 ## 目录与文件存放位置
 
@@ -49,13 +55,13 @@ codex resume                                   # 也可直接运行 codex
 | --- | --- |
 | `user-sfs/.webstudio-agent-home` | Codex 会话、历史记录、配置及其他智能体状态 |
 | `user-sfs/.webstudio-agent-home/gh` | GitHub CLI 登录数据 |
-| `user-sfs/.webstudio-tunnel` | 隧道名称及 VS Code CLI 身份与登录数据 |
+| `/home/ma-user/work/.webstudio-tunnel` | 当前容器的隧道名称、CLI 身份与登录数据 |
 | `user-sfs/tools` 和 `cache` | 固定版本的 CLI 软件包、VS Code 运行环境及下载缓存 |
 | `user-sfs/tools/gh` | 供新终端和新容器共用的 GitHub CLI 可执行文件 |
 | `user-sfs/tools/tmux` | tmux 及其 Conda 依赖 |
-| `/tmp/webstudio-$UID` | 本地 CLI 副本、VS Code CLI 及 VS Code 服务端 |
+| `/tmp/webstudio-$UID` | 安装日志、VS Code CLI 及 VS Code 服务端 |
 
-固定版本在 `setup_container.sh` 中定义：
+固定版本在 `setup_tools.sh` 中定义：
 
 | 工具 | 版本 | 覆盖变量 |
 | --- | --- | --- |
@@ -63,7 +69,7 @@ codex resume                                   # 也可直接运行 codex
 | Claude Code | `2.1.322` | `WEBSTUDIO_CLAUDE_VERSION` |
 | GitHub CLI | `2.103.3` | `WEBSTUDIO_GH_VERSION` |
 
-首次安装会将各软件包下载到持久化存储；每个新容器再将其复制到本地磁盘。VS Code CLI 的下载文件也会缓存在持久化存储中，然后在本地解压。VS Code 服务端使用的 Conda 运行环境保留在持久化存储中。容器内需要有 `node`、`npm`、`conda`、`curl` 和 `tar`；隧道启动脚本会检查平台要求。
+首次安装会将各软件包下载到持久化存储；新容器直接从 SFS 运行智能体。VS Code CLI 的下载文件也会缓存在持久化存储中，然后在本地解压。VS Code 服务端使用的 Conda 运行环境保留在持久化存储中。容器内需要有 `node`、`npm`、`conda`、`curl` 和 `tar`；隧道启动脚本会检查平台要求。
 
 ## 选择智能体
 
@@ -72,7 +78,7 @@ codex resume                                   # 也可直接运行 codex
 在脚本中运行（不显示选择菜单）时，请使用：
 
 ```bash
-./setup_container.sh --agents both --tools both --official --skip-vscode
+./setup_tools.sh --agents both --tools both --official --skip-vscode
 # 其他选项：--agents codex、--agents claude、--agents none
 source shell/init.sh
 ```
@@ -81,7 +87,7 @@ source shell/init.sh
 
 可用 `--tools tmux|gh|both|none` 指定工具，或使用 `--skip-tmux` / `--skip-gh` 跳过对应工具并关闭工具菜单。不选择 GitHub CLI 时也会跳过 GitHub 登录。跳过安装不会卸载已有工具。非交互安装默认选择两个工具。后台隧道需要 tmux；若跳过 tmux 且系统中没有 tmux，菜单只提供前台启动或稍后启动。
 
-两个 CLI 都缓存在 `tools/<agent>/<version>` 中，并复制到本地 `/tmp/webstudio-$UID` 下供运行使用。默认通过 `https://registry.npmmirror.com` 下载；设置 `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` 可改用官方源。这不会修改全局 npm 设置。
+两个 CLI 都安装在持久化的 `tools/<agent>/<version>` 中并直接运行。默认通过 `https://registry.npmmirror.com` 下载；设置 `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` 可改用官方源。这不会修改全局 npm 设置。
 
 ## 凭据与网关配置
 
@@ -105,11 +111,46 @@ GitHub CLI 在验证官方发布文件的校验和后，会安装到 `tools/gh` 
 
 ## 容器重启后
 
-在尚未完成安装时加载 `shell/init.sh`，脚本会检查 `WEBSTUDIO_LOCAL_DIR` 中的完成标记，并询问是否运行安装脚本。选择否后，终端仍可使用，同时会显示供之后运行的命令。没有终端时，脚本会显示命令并返回非零状态，不会等待输入。完成标记仅在安装成功后写入；请将 `WEBSTUDIO_LOCAL_DIR` 保持在容器本地的临时存储上，以便检测容器更换。
+停止后重启容器，或新建挂载相同 SFS 路径的容器后：
 
-更换容器会清除主目录中的链接和本地可执行文件副本。重新运行安装脚本即可从持久化挂载目录恢复这些内容。仅保存在已清空的主目录中的状态无法恢复。
+```bash
+cd /home/user/work/dataset/user-sfs/webstudio-utils
+source shell/init.sh
+./scripts/start_vscode_tunnel.sh --background  # 需要 VS Code 时运行
+```
 
-`shell/init.sh` 会将持久化智能体目录链接到 `$HOME`，并在 `.bashrc` 和当前使用的 Bash 登录配置文件中添加可重复执行而不产生重复内容的启动钩子，同时保留现有配置。登录终端和普通交互式终端均受支持，包括以 root 用户运行的容器。它会设置 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 和 `GH_CONFIG_DIR`，清除 Bash 的 `TMOUT`，并将本地 CLI 加入 `PATH`。安装脚本还会检查 Codex 守护进程控制目录是否为私有目录，并修复迁移后仍指向旧挂载位置的守护进程软件包链接。
+必须使用 `source`，不能用 `bash shell/init.sh`，这样才能修改当前终端环境。
+初始化本身不会启动或选择隧道。启动脚本使用
+`$WEBSTUDIO_TUNNEL_DIR/name` 中的名称和
+`$WEBSTUDIO_TUNNEL_DIR/cli-data` 中的身份与登录数据。
+默认目录为容器本地的 `/home/ma-user/work/.webstudio-tunnel`；
+工具和下载缓存仍在共享 SFS 上。
+
+新容器没有保存的名称时，启动脚本会生成并保存唯一名称，然后引导登录，
+不需要重新安装工具。也可首次启动时自行指定：
+
+```bash
+WEBSTUDIO_TUNNEL_NAME=my-container ./scripts/start_vscode_tunnel.sh --background
+```
+
+该名称会保存在当前容器中，后续启动、查询和停止无需再次设置。
+前台 `--name` 参数只作用于当次启动。如果停止并重启后工作目录仍然保留，
+可复用原身份；工作目录为空的新容器会创建独立身份并需要登录。
+
+用 `WEBSTUDIO_TUNNEL_DIR` 可更改容器本地目录，安装、启动、查询和停止时
+需使用同一设置。`VSCODE_CLI_DATA_DIR` 可单独覆盖身份目录。
+不要让两个活动容器使用相同身份目录或名称。
+旧的 `SFS/.webstudio-tunnel` 文件不会被删除，但默认不再使用；
+切换前应停止旧隧道，新的本地身份需单独登录。
+
+在持久化存储上运行一次 `setup_tools.sh`。完成标记保存在
+`WEBSTUDIO_AGENT_STATE_DIR` 中。更换容器后只需加载 `shell/init.sh`，
+恢复环境变量、PATH、主目录链接、Bash 启动钩子和 Git 凭据助手。
+旧安装需运行一次新安装脚本以迁移临时标记。
+智能体可执行文件直接使用持久化存储中的版本，新容器仍需兼容的系统环境和 Node。
+VS Code 首次启动会从缓存解压 CLI，并可能重新安装服务端。
+
+`shell/init.sh` 会将持久化智能体目录链接到 `$HOME`，并在 `.bashrc` 和当前使用的 Bash 登录配置文件中添加可重复执行而不产生重复内容的启动钩子，同时保留现有配置。登录终端和普通交互式终端均受支持，包括以 root 用户运行的容器。它会设置 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 和 `GH_CONFIG_DIR`，清除 Bash 的 `TMOUT`，并将持久化 CLI 加入 `PATH`。安装脚本还会检查 Codex 守护进程控制目录是否为私有目录，并修复迁移后仍指向旧挂载位置的守护进程软件包链接。
 
 安装完成后，在当前终端中加载 `shell/init.sh`；之后新开的 Bash 终端会自动加载。使用 `--norc` 启动的终端需要手动加载。新 Bash 终端会自动加载此环境，保存的凭据也会在容器重启后保留，因此无需再次导出密钥或单独登录：
 
@@ -140,7 +181,7 @@ cp -a /home/user/work/dataset/user/.webstudio-agent-home/.codex/. \
 ```bash
 unset WEBSTUDIO_PERSIST_ROOT WEBSTUDIO_AGENT_STATE_DIR WEBSTUDIO_LOCAL_DIR
 cd /home/user/work/dataset/user-sfs/webstudio-utils
-./setup_container.sh
+./setup_tools.sh
 source shell/init.sh
 ```
 
@@ -151,8 +192,25 @@ source shell/init.sh
 ## 可用选项
 
 ```bash
-./setup_container.sh --help
+./setup_tools.sh --help
 ./scripts/start_vscode_tunnel.sh --help
 ```
 
 如需快速安装智能体而跳过 VS Code，请使用 `--skip-vscode`；如只需隧道，请使用 `--agents none`。在加载 `shell/init.sh` 前设置 `WEBSTUDIO_PERSIST_ROOT`、`WEBSTUDIO_AGENT_STATE_DIR` 或 `WEBSTUDIO_LOCAL_DIR`，可覆盖默认路径。隧道启动脚本支持 `CONDA_EXE`、`VSCODE_INSTALL_DIR`、`VSCODE_LOCAL_DIR`、`VSCODE_GLIBC_LINKER` 和 `VSCODE_CONDA_SOLVER`。
+
+## 多容器同时运行 VS Code
+
+每个容器使用自己的 `/home/ma-user/work/.webstudio-tunnel`。
+路径虽然相同，但工作目录属于各自容器，默认生成的名称也不同。
+因此可以在两个容器中分别运行：
+
+```bash
+source shell/init.sh
+./scripts/start_vscode_tunnel.sh --background
+```
+
+每个容器首次登录后会显示自己的 VS Code URL。
+也可首次启动时通过 `WEBSTUDIO_TUNNEL_NAME` 指定不同名称，
+如 `webstudio-box-a` 和 `webstudio-box-b`。
+工具存储仍共享 SFS，隧道身份保存在各自容器本地。
+同时修改相同的 SFS 文件仍可能互相覆盖。

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sourced by setup_container.sh after scripts/ui.sh and ui_setup; uses its
+# Sourced by setup_tools.sh after scripts/ui.sh and ui_setup; uses its
 # skip_codex, skip_claude, tunnel_name, and start_tunnel variables.
 # prompt_yes_no is also used by shell/init.sh and needs nothing else.
 choose_agents() {

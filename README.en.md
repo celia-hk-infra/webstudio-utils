@@ -2,11 +2,12 @@
 
 # webstudio-utils
 
-Bootstrap a new WebStudio container from a checkout on any filesystem. The setup
-script uses the checkout's parent directory for persistent data; set
-`WEBSTUDIO_PERSIST_ROOT` to use a different location.
+Install tools once on persistent storage, then initialize each container's shell.
+Keep this repo on SFS. By default, tools and state live beside the repo in its
+parent directory, not inside the Git checkout. Set `WEBSTUDIO_PERSIST_ROOT` to
+use a different location.
 
-- [New container](#new-container)
+- [First-time setup](#first-time-setup)
 - [What lives where](#what-lives-where)
 - [Choosing agents](#choosing-agents)
 - [Credentials and gateway configuration](#credentials-and-gateway-configuration)
@@ -15,17 +16,23 @@ script uses the checkout's parent directory for persistent data; set
 - [Troubleshooting](#troubleshooting)
 - [Options](#options)
 
-## New container
+## First-time setup
 
 Keep the checkout on a persistent mount that preserves Unix permissions, for
 example `/home/user/work/dataset/user-sfs/webstudio-utils`:
 
 ```bash
 cd /home/user/work/dataset/user-sfs/webstudio-utils
-./setup_container.sh --tunnel-name my-jupyter  # choose a name on the first run
+./setup_tools.sh --tunnel-name my-jupyter  # choose a name on the first run
 source shell/init.sh                           # for this terminal's environment
 codex resume                                   # or simply: codex
 ```
+
+Setup runs `shell/init.sh` during setup and again after installation to configure
+home-directory links, Bash startup hooks, environment variables, and PATH.
+Because `./setup_tools.sh` runs in a child process, source `shell/init.sh` afterward
+to apply that environment to your current terminal too. Future Bash terminals
+load the saved startup hook automatically.
 
 Setup also installs tmux with its dependencies under `tools/tmux` on persistent
 storage and makes it available in new shells. Conda is required for the first
@@ -43,8 +50,9 @@ terminal closes. Use `--start-tunnel` (background) or
 unless explicitly requested. `--skip-vscode` skips tunnel installation and the
 start question, and cannot be combined with `--start-tunnel`.
 
-The setup script saves the tunnel name, so later containers can run
-`./setup_container.sh` without `--tunnel-name`. It is safe to rerun.
+The setup script saves the tunnel name in this container’s work directory. Later containers only need
+`source shell/init.sh`, followed by the tunnel launcher if you want VS Code.
+Rerun setup when you want to install or reconfigure tools.
 
 After setup, manage the tunnel directly:
 
@@ -56,14 +64,14 @@ After setup, manage the tunnel directly:
 ```
 
 The tunnel launcher also sources `shell/init.sh`, so it passes the agent
-environment to VS Code terminals. It preserves the tunnel's CLI identity and
-sign-in data on persistent storage, and reuses the saved name. The server
+environment to VS Code terminals. It keeps the tunnel's CLI identity and
+sign-in data in this container's work directory, and reuses its saved name. The server
 installation runs on local `/tmp` storage and is rebuilt when a container is
 replaced. A sign-in may still be needed if the stored credential expires or is
 revoked. Do not run the same tunnel identity from two containers at once.
 
 Tunnel names can be at most 20 letters, digits, or hyphens. Use
-`./setup_container.sh --tunnel-name SHORT-NAME` to change a saved name.
+`./setup_tools.sh --tunnel-name SHORT-NAME` to change a saved name.
 
 ## What lives where
 
@@ -71,13 +79,13 @@ Tunnel names can be at most 20 letters, digits, or hyphens. Use
 | --- | --- |
 | `user-sfs/.webstudio-agent-home` | Codex sessions, history, configuration, and other agent state |
 | `user-sfs/.webstudio-agent-home/gh` | GitHub CLI login data |
-| `user-sfs/.webstudio-tunnel` | Tunnel name and VS Code CLI identity/sign-in data |
+| `/home/ma-user/work/.webstudio-tunnel` | Container-specific tunnel name and CLI identity/sign-in data |
 | `user-sfs/tools` and `cache` | Pinned CLI packages, VS Code runtime, and download cache |
 | `user-sfs/tools/gh` | GitHub CLI binary, shared by new shells and containers |
 | `user-sfs/tools/tmux` | tmux and its Conda dependencies |
-| `/tmp/webstudio-$UID` | Local CLI copies, VS Code CLI, and VS Code server |
+| `/tmp/webstudio-$UID` | Setup logs, VS Code CLI, and VS Code server |
 
-Pinned versions live in `setup_container.sh`:
+Pinned versions live in `setup_tools.sh`:
 
 | Tool | Version | Override |
 | --- | --- | --- |
@@ -85,8 +93,8 @@ Pinned versions live in `setup_container.sh`:
 | Claude Code | `2.1.322` | `WEBSTUDIO_CLAUDE_VERSION` |
 | GitHub CLI | `2.103.3` | `WEBSTUDIO_GH_VERSION` |
 
-The first setup downloads each package to persistent storage; every fresh
-container copies it to local disk. The VS Code CLI download is also cached on
+The first setup downloads each agent package to persistent storage; new
+containers run those installed executables directly from SFS. The VS Code CLI download is also cached on
 persistent storage, then extracted locally. The Conda runtime for the VS Code
 server stays on persistent storage. The script needs `node`, `npm`, `conda`,
 `curl`, and `tar` in the container; the tunnel launcher checks its platform
@@ -103,7 +111,7 @@ Enter keeps existing credentials if all selected agents have keys.
 For scripts (no selection menu), use:
 
 ```bash
-./setup_container.sh --agents both --skip-vscode
+./setup_tools.sh --agents both --skip-vscode
 # Other choices: --agents codex, --agents claude, --agents none
 source shell/init.sh
 ```
@@ -115,8 +123,7 @@ saved keys. Missing credentials stop setup before downloads. Selecting
 exclude an agent without showing the menu. Skipping an agent does not uninstall
 it.
 
-Both CLIs are cached under `tools/<agent>/<version>` and staged locally under
-`/tmp/webstudio-$UID`. Downloads use `https://registry.npmmirror.com` by
+Both CLIs are installed under `tools/<agent>/<version>` on persistent storage. Downloads use `https://registry.npmmirror.com` by
 default; set `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` to use the
 official registry instead. This does not change global npm settings.
 
@@ -169,22 +176,61 @@ Environment tokens must be supplied again in new containers. Use
 
 ## After a container restart
 
-When you source `shell/init.sh` before setup, it checks for a completion marker
-in `WEBSTUDIO_LOCAL_DIR` and offers to run setup. Choosing No leaves the shell
-usable and prints the command to run later. Without a terminal, it prints the
-command and returns a nonzero status instead of prompting. The marker is written
-only after successful setup; keep `WEBSTUDIO_LOCAL_DIR` on local, disposable
-storage so a replacement container is detected.
+For a stopped/restarted container or a new container mounting the same SFS path:
 
-Container replacement wipes home-directory links and local executable copies.
-Rerunning setup restores those from the persistent mount. It does not recover
-state that was stored only in the wiped home directory.
+```bash
+cd /home/user/work/dataset/user-sfs/webstudio-utils
+source shell/init.sh
+./scripts/start_vscode_tunnel.sh --background  # only if you want VS Code
+```
+
+Use `source`, not `bash shell/init.sh`: initialization must update the current
+shell. Initialization does not start or select a tunnel.
+
+### How the tunnel is selected
+
+The launcher uses `$WEBSTUDIO_TUNNEL_DIR/name` for its name and
+`$WEBSTUDIO_TUNNEL_DIR/cli-data` for its identity and login. The default directory
+is `/home/ma-user/work/.webstudio-tunnel`, on container-local storage.
+Tool binaries and download caches remain shared on SFS.
+
+If a new container has no saved name, the launcher generates and saves a unique
+name, then asks you to sign in. You do not need to rerun tool setup.
+To choose the name yourself on first launch:
+
+```bash
+WEBSTUDIO_TUNNEL_NAME=my-container ./scripts/start_vscode_tunnel.sh --background
+```
+
+The launcher saves this name for subsequent start/status/stop commands.
+A foreground `--name` argument applies only to that launch.
+A stopped/restarted container reuses its identity if its work directory survives;
+a replacement container with an empty work directory gets a new identity.
+
+Set `WEBSTUDIO_TUNNEL_DIR` to change the container-local directory (keep the
+same override for setup, launch, status, and stop). `VSCODE_CLI_DATA_DIR` can
+override just the CLI identity directory. Do not point multiple active containers
+at the same identity directory or give them the same tunnel name.
+
+Old `SFS/.webstudio-tunnel` files are left untouched and are no longer used by
+default. Stop any old tunnel before switching; the new local identity needs its
+own sign-in.
+
+Run `setup_tools.sh` once per persistent installation. The completion marker lives
+in `WEBSTUDIO_AGENT_STATE_DIR`. After replacing or restarting a container, source
+`shell/init.sh` to restore environment variables, PATH, home links, startup hooks,
+and Git's credential helper. No tool installation is needed. Existing installations
+using the old temporary marker need one run of `setup_tools.sh` to migrate.
+
+Agent executables now run from persistent storage. The new container still needs
+a compatible Linux environment and Node for Node-based CLIs. VS Code stages its
+cached CLI locally on first launch and may install its server again.
 
 `shell/init.sh` links persistent agent directories into `$HOME` and appends an
 idempotent startup hook to `.bashrc` and the active Bash login profile,
 preserving existing configuration. This supports both login and regular
 interactive terminals, including root containers. It sets `CODEX_HOME`,
-`CLAUDE_CONFIG_DIR`, and `GH_CONFIG_DIR`, clears Bash `TMOUT`, and puts staged
+`CLAUDE_CONFIG_DIR`, and `GH_CONFIG_DIR`, clears Bash `TMOUT`, and puts persistent
 CLIs on `PATH`. The setup also checks that Codex's daemon control directory is
 private and repairs a migrated daemon package link that still points to the
 previous mount.
@@ -238,7 +284,7 @@ overrides from an older checkout, clear them first:
 ```bash
 unset WEBSTUDIO_PERSIST_ROOT WEBSTUDIO_AGENT_STATE_DIR WEBSTUDIO_LOCAL_DIR
 cd /home/user/work/dataset/user-sfs/webstudio-utils
-./setup_container.sh
+./setup_tools.sh
 source shell/init.sh
 ```
 
@@ -252,7 +298,7 @@ configuration.
 ## Options
 
 ```bash
-./setup_container.sh --help
+./setup_tools.sh --help
 ./scripts/start_vscode_tunnel.sh --help
 ```
 
@@ -261,3 +307,20 @@ For a quick agent-only setup, use `--skip-vscode`; for a tunnel-only setup, use
 `WEBSTUDIO_LOCAL_DIR` before sourcing `shell/init.sh` to override the defaults.
 The tunnel launcher accepts `CONDA_EXE`, `VSCODE_INSTALL_DIR`,
 `VSCODE_LOCAL_DIR`, `VSCODE_GLIBC_LINKER`, and `VSCODE_CONDA_SOLVER`.
+
+## Concurrent VS Code containers
+
+Each container uses its own `/home/ma-user/work/.webstudio-tunnel` directory.
+The identical path is safe because the work directory is container-local.
+The default generated names differ, so both containers can run:
+
+```bash
+source shell/init.sh
+./scripts/start_vscode_tunnel.sh --background
+```
+
+Each container signs in once and prints its own VS Code URL. You can also choose
+distinct names, such as `webstudio-box-a` and `webstudio-box-b`, with
+`WEBSTUDIO_TUNNEL_NAME` on first launch. Keep tool storage on the shared SFS
+mount and tunnel identity storage local to each container. Editing the same
+SFS files concurrently can still overwrite changes.

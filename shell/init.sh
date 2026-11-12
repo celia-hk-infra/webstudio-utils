@@ -12,28 +12,30 @@ fi
 
 # Check before installing hooks or creating state. Setup bypasses this guard.
 _webstudio_init_repo=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P) || return 1
-_webstudio_setup_marker="${WEBSTUDIO_LOCAL_DIR:-/tmp/webstudio-${UID}}/.setup-complete"
+WEBSTUDIO_PERSIST_ROOT=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$_webstudio_init_repo/.." && pwd -P)}
+WEBSTUDIO_AGENT_STATE_DIR=${WEBSTUDIO_AGENT_STATE_DIR:-$WEBSTUDIO_PERSIST_ROOT/.webstudio-agent-home}
+_webstudio_setup_marker="$WEBSTUDIO_AGENT_STATE_DIR/.setup-complete"
 if [[ ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 ]] &&
     { [[ ! -f $_webstudio_setup_marker ]] || [[ $(cat -- "$_webstudio_setup_marker") != "$_webstudio_init_repo" ]]; }; then
-    printf 'This container has not been set up yet.\n'
+    printf 'Tools have not been set up on this persistent mount yet.\n'
     if [[ -t 0 ]]; then
         source "$_webstudio_init_repo/scripts/setup_prompts.sh"
-        if prompt_yes_no 'Run container setup now? [y/N] '; then
-            if ! bash "$_webstudio_init_repo/setup_container.sh"; then
+        if prompt_yes_no 'Run tools setup now? [y/N] '; then
+            if ! bash "$_webstudio_init_repo/setup_tools.sh"; then
                 # Stopping the optional foreground tunnel does not undo setup.
                 if [[ ! -f $_webstudio_setup_marker ]] || [[ $(cat -- "$_webstudio_setup_marker") != "$_webstudio_init_repo" ]]; then
-                    printf 'Setup did not finish successfully. Rerun setup_container.sh to continue.\n' >&2
+                    printf 'Setup did not finish successfully. Rerun setup_tools.sh to continue.\n' >&2
                     unset _webstudio_init_repo _webstudio_setup_marker
                     return 1
                 fi
             fi
         else
-            printf 'When ready, run: bash %q\n' "$_webstudio_init_repo/setup_container.sh"
+            printf 'When ready, run: bash %q\n' "$_webstudio_init_repo/setup_tools.sh"
             unset _webstudio_init_repo _webstudio_setup_marker
             return 0
         fi
     else
-        printf 'Run: bash %q\n' "$_webstudio_init_repo/setup_container.sh" >&2
+        printf 'Run: bash %q\n' "$_webstudio_init_repo/setup_tools.sh" >&2
         unset _webstudio_init_repo _webstudio_setup_marker
         return 1
     fi
@@ -44,6 +46,8 @@ unset _webstudio_init_repo _webstudio_setup_marker
 _webstudio_shell_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")") || return 1
 WEBSTUDIO_PERSIST_ROOT=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$_webstudio_shell_dir/../.." && pwd -P)}
 export WEBSTUDIO_PERSIST_ROOT
+# Tunnel identity belongs to this container, never the shared tools mount.
+export WEBSTUDIO_TUNNEL_DIR=${WEBSTUDIO_TUNNEL_DIR:-/home/ma-user/work/.webstudio-tunnel}
 WEBSTUDIO_AGENT_STATE_DIR=${WEBSTUDIO_AGENT_STATE_DIR:-$WEBSTUDIO_PERSIST_ROOT/.webstudio-agent-home}
 export WEBSTUDIO_AGENT_STATE_DIR
 if ! mkdir -p -m 700 -- "$WEBSTUDIO_AGENT_STATE_DIR"; then
@@ -167,14 +171,14 @@ case ":$PATH:" in
     *) export PATH="$npm_config_prefix/bin:$PATH" ;;
 esac
 
-# setup_container.sh stages agent CLIs locally for faster startup.
+# Executables remain on SFS; replacing a container requires no installation.
 WEBSTUDIO_LOCAL_DIR=${WEBSTUDIO_LOCAL_DIR:-/tmp/webstudio-${UID}}
 export WEBSTUDIO_LOCAL_DIR
-_webstudio_project_bin="$WEBSTUDIO_LOCAL_DIR/bin"
-if [[ -d "$_webstudio_project_bin" ]]; then
-    case ":$PATH:" in
-        *":$_webstudio_project_bin:"*) ;;
-        *) export PATH="$_webstudio_project_bin:$PATH" ;;
-    esac
+case ":$PATH:" in
+    *":$WEBSTUDIO_AGENT_STATE_DIR/bin:"*) ;;
+    *) export PATH="$WEBSTUDIO_AGENT_STATE_DIR/bin:$PATH" ;;
+esac
+# Restore the container-local Git credential helper without a network check.
+if [[ ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 && -x $WEBSTUDIO_PERSIST_ROOT/tools/gh/current/bin/gh && -f $GH_CONFIG_DIR/hosts.yml ]]; then
+    gh auth setup-git --hostname github.com || return 1
 fi
-unset _webstudio_project_bin

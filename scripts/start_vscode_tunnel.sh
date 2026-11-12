@@ -7,7 +7,8 @@ if [[ "${1:-}" == --help ]]; then
 Usage: bash start_vscode_tunnel.sh [--install-only | --background | --status | --stop | tunnel options...]
 First run installs a small Conda runtime and downloads the VS Code CLI.
 Default: run the tunnel in this terminal using the name saved by
-setup_container.sh; Ctrl+C stops it.
+setup_tools.sh; on a fresh container a unique name is generated and saved.
+Ctrl+C stops it.
 --background  sign in if needed, then run the tunnel in the detached tmux
               session "vscode-tunnel" and print its URL once it connects.
               It keeps running after the terminal closes, until --stop or a
@@ -15,7 +16,9 @@ setup_container.sh; Ctrl+C stops it.
 --status      show whether a tunnel is connected.
 --stop        stop the background session and any running tunnel.
 Example: bash start_vscode_tunnel.sh --background
-Overrides: CONDA_EXE, VSCODE_INSTALL_DIR, VSCODE_LOCAL_DIR,
+Overrides: WEBSTUDIO_TUNNEL_DIR (default /home/ma-user/work/.webstudio-tunnel),
+           WEBSTUDIO_TUNNEL_NAME, VSCODE_CLI_DATA_DIR,
+           CONDA_EXE, VSCODE_INSTALL_DIR, VSCODE_LOCAL_DIR,
            VSCODE_GLIBC_LINKER (default /lib64/ld-linux-x86-64.so.2),
            VSCODE_CONDA_SOLVER (default classic),
            VSCODE_TUNNEL_PROVIDER (sign-in for --background: github or microsoft).
@@ -27,6 +30,7 @@ fi
 script_path=$(readlink -f -- "${BASH_SOURCE[0]}")
 source "$(dirname -- "${BASH_SOURCE[0]}")/../shell/init.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/ui.sh"
+source "$(dirname -- "${BASH_SOURCE[0]}")/tunnel_config.sh"
 ui_setup
 mode=foreground
 case "${1:-}" in
@@ -38,7 +42,7 @@ RUNTIME="$INSTALL_DIR/runtime"
 LOCAL_DIR="${VSCODE_LOCAL_DIR:-$WEBSTUDIO_LOCAL_DIR/vscode}"
 CLI="$LOCAL_DIR/bin/code"
 CLI_ARCHIVE="$INSTALL_DIR/cli-alpine-x64.tar.gz"
-CLI_DATA_DIR="$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel/cli-data"
+CLI_DATA_DIR="${VSCODE_CLI_DATA_DIR:-$WEBSTUDIO_TUNNEL_DIR/cli-data}"
 
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
   echo 'This script requires x86_64 Linux.' >&2; exit 1;
@@ -124,9 +128,10 @@ session_running() {
 }
 
 saved_name() {
-  local name=
-  if [[ -s $WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel/name ]]; then
-    IFS= read -r name < "$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel/name"
+  local name=${WEBSTUDIO_TUNNEL_NAME:-}
+  if [[ -n $name ]]; then printf '%s' "$name"; return; fi
+  if [[ -s $WEBSTUDIO_TUNNEL_DIR/name ]]; then
+    IFS= read -r name < "$WEBSTUDIO_TUNNEL_DIR/name"
   fi
   printf '%s' "$name"
 }
@@ -190,14 +195,14 @@ case $mode in
     ;;
   background)
     if (( $# )); then
-      echo '--background does not accept tunnel options; edit the saved name with setup_container.sh --tunnel-name.' >&2
+      echo '--background does not accept tunnel options; edit the saved name with setup_tools.sh --tunnel-name.' >&2
       exit 2
     fi
     command -v tmux >/dev/null 2>&1 || {
-      echo 'tmux is required for --background; rerun setup_container.sh or start without --background.' >&2
+      echo 'tmux is required for --background; rerun setup_tools.sh or start without --background.' >&2
       exit 1
     }
-    [[ -n $(saved_name) ]] || { echo 'Tunnel name is missing. Run setup_container.sh first.' >&2; exit 1; }
+    webstudio_ensure_tunnel_name
     ui_bar
     if tunnel_connected; then
       ui_ok 'VS Code tunnel is already running'
@@ -213,7 +218,7 @@ case $mode in
         exit 1
       fi
       ui_step 'Sign in to authorize the VS Code tunnel'
-      ui_note 'Open the link below and enter the code. The sign-in is kept on persistent storage.'
+      ui_note "Open the link below and enter the code. The sign-in is kept in this container's tunnel directory."
       "$CLI" tunnel user login --provider "${VSCODE_TUNNEL_PROVIDER:-github}" --cli-data-dir "$CLI_DATA_DIR"
       ui_bar
     fi
@@ -222,7 +227,7 @@ case $mode in
       chmod 600 -- "$TUNNEL_LOG"
       tmux_env=()
       for name in WEBSTUDIO_PERSIST_ROOT WEBSTUDIO_LOCAL_DIR VSCODE_INSTALL_DIR VSCODE_LOCAL_DIR \
-        VSCODE_GLIBC_LINKER VSCODE_CONDA_SOLVER CONDA_EXE; do
+        VSCODE_GLIBC_LINKER VSCODE_CONDA_SOLVER CONDA_EXE VSCODE_CLI_DATA_DIR WEBSTUDIO_TUNNEL_NAME WEBSTUDIO_TUNNEL_DIR; do
         if [[ -n ${!name:-} ]]; then tmux_env+=(-e "$name=${!name}"); fi
       done
       printf -v pipe_command 'cat >> %q' "$TUNNEL_LOG"
@@ -251,7 +256,7 @@ if [[ "${1:-}" == --install-only ]]; then
   exit 0
 fi
 
-# Keep identity and sign-in data on NFS; install server files on local disk.
+# Keep identity and sign-in data container-local, as well as server files.
 mkdir -p -m 700 -- "$CLI_DATA_DIR"
 chmod 700 -- "$CLI_DATA_DIR"
 tunnel_args=("$@")
@@ -262,15 +267,11 @@ for arg in "${tunnel_args[@]}"; do
   fi
 done
 if (( ! has_name )); then
-  name_file="$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel/name"
-  [[ -s $name_file ]] || {
-    echo 'Tunnel name is missing. Run setup_container.sh first.' >&2
-    exit 1
-  }
-  IFS= read -r tunnel_name < "$name_file"
+  webstudio_ensure_tunnel_name
+  tunnel_name=$(saved_name)
   [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || {
     echo "Invalid saved tunnel name '$tunnel_name' (maximum 20 letters, digits, or hyphens)." >&2
-    echo 'Run setup_container.sh --tunnel-name SHORT-NAME to replace it.' >&2
+    echo 'Run setup_tools.sh --tunnel-name SHORT-NAME to replace it.' >&2
     exit 2
   }
   tunnel_args=(--name "$tunnel_name" "${tunnel_args[@]}")

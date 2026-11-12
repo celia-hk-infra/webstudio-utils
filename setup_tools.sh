@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run once after a new container starts. Safe to rerun in the same container.
+# Install tools once on the persistent mount. Safe to rerun.
 set -euo pipefail
 # Do not expose credentials when invoked with bash -x or bash -v.
 set +xv
@@ -25,7 +25,7 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_tools.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 Choose whether to override official endpoints with OpenLux (default: no).
@@ -93,7 +93,7 @@ ui_setup
 trap ui_cleanup EXIT
 trap 'exit 130' INT TERM
 source "$repo_dir/scripts/setup_prompts.sh"
-if [[ -t 0 ]]; then ui_intro 'WebStudio container setup' 'Safe to rerun; answers are saved'; fi
+if [[ -t 0 ]]; then ui_intro 'WebStudio tools setup' 'Safe to rerun; answers are saved'; fi
 
 if [[ -n $agents ]]; then
   case $agents in
@@ -151,15 +151,15 @@ fi
 # Keep the key in a non-exported shell variable until it is piped to each CLI.
 unset OPENLUX_API_KEY
 
-tunnel_dir="$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel"
+source "$repo_dir/scripts/tunnel_config.sh"
+tunnel_dir="$WEBSTUDIO_TUNNEL_DIR"
 mkdir -p -m 700 -- "$tunnel_dir/cli-data"
 chmod 700 -- "$tunnel_dir" "$tunnel_dir/cli-data"
 if [[ -z $tunnel_name ]]; then
   if [[ -s $tunnel_dir/name ]]; then
     IFS= read -r tunnel_name < "$tunnel_dir/name"
   else
-    tunnel_name=$(basename -- "$WEBSTUDIO_PERSIST_ROOT" | tr -c 'A-Za-z0-9-\n' - | cut -c 1-10)
-    tunnel_name="webstudio-$tunnel_name"
+    tunnel_name=$(webstudio_default_tunnel_name)
   fi
   if (( ! skip_vscode )) && [[ -t 0 ]]; then
     [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || tunnel_name=webstudio
@@ -315,24 +315,9 @@ install_agent() {
     mv -- "$install_stage" "$agent_cache"
   fi
 
-  local_agent_root="$WEBSTUDIO_LOCAL_DIR/$agent_name"
-  local_agent="$local_agent_root/$agent_version"
-  mkdir -p -- "$local_agent_root"
-  if [[ ! -x $local_agent/node_modules/.bin/$agent_name ]]; then
-    local_stage=$(mktemp -d "$local_agent_root/.stage.XXXXXX")
-    cp -a -- "$agent_cache/node_modules" "$local_stage/"
-    if [[ ! -x $local_stage/node_modules/.bin/$agent_name ]]; then
-      rm -rf -- "$local_stage"
-      echo "Local ${agent_label} copy is incomplete." >&2
-      exit 1
-    fi
-    if [[ -e $local_agent ]]; then
-      echo "Incomplete local ${agent_label} copy at $local_agent; move it aside and rerun." >&2
-      exit 1
-    fi
-    mv -- "$local_stage" "$local_agent"
-  fi
-  ln -sfnT -- "$local_agent/node_modules/.bin/$agent_name" "$WEBSTUDIO_LOCAL_DIR/bin/$agent_name"
+  mkdir -p -- "$WEBSTUDIO_AGENT_STATE_DIR/bin"
+  ln -sfnT -- "$agent_cache/node_modules/.bin/$agent_name" "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name"
+  ln -sfnT -- "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name" "$WEBSTUDIO_LOCAL_DIR/bin/$agent_name"
 }
 
 codex_login() {
@@ -390,6 +375,9 @@ if (( ! skip_vscode )); then
   ui_ok 'VS Code tunnel CLI ready' "tunnel name: $tunnel_name"
 fi
 
+# Refresh paths and shell integration after installing the tools.
+source "$repo_dir/shell/init.sh"
+
 installed=()
 (( skip_codex )) || installed+=(codex)
 (( skip_claude )) || installed+=(claude)
@@ -407,9 +395,9 @@ if (( ! skip_vscode )) && [[ $start_tunnel != @(background|foreground) ]]; then
 fi
 ui_box 'Setup complete' "${summary[@]}"
 
-# Only mark a fully completed setup; local storage is reset on replacement.
-printf '%s\n' "$repo_dir" > "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
-chmod 600 -- "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
+# Mark successful installation on persistent storage.
+printf '%s\n' "$repo_dir" > "$WEBSTUDIO_AGENT_STATE_DIR/.setup-complete"
+chmod 600 -- "$WEBSTUDIO_AGENT_STATE_DIR/.setup-complete"
 unset WEBSTUDIO_SETUP_RUNNING
 if (( ! skip_vscode )); then
   case $start_tunnel in
