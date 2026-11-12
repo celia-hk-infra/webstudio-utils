@@ -14,16 +14,20 @@ selection_explicit=0
 skip_claude=0
 skip_codex=0
 skip_vscode=0
+skip_gh_auth=0
 tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 Then enter your OpenLux API key once for the selected agents.
 Without a terminal, selection defaults to both; supply OPENLUX_API_KEY unless
 all selected agents already have saved credentials.
+GitHub login is required unless --skip-gh-auth is set. Interactive setup starts
+browser login and saves the token in private persistent storage. Unattended
+setup needs a saved GitHub login, GH_TOKEN, or GITHUB_TOKEN.
 Prepare persistent agent state and tools, stage CLIs on local disk, and install
 the VS Code tunnel CLI. Start the tunnel separately with:
   ./scripts/start_vscode_tunnel.sh
@@ -49,6 +53,7 @@ while (($#)); do
     --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
+    --skip-gh-auth) skip_gh_auth=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -117,7 +122,25 @@ if [[ ! -x $gh_release/bin/gh ]]; then
   rmdir -- "$gh_stage"
 fi
 ln -sfnT -- "$gh_version" "$gh_root/current"
+# The first shell init ran before gh existed; expose the new install now.
+export PATH="$gh_root/current/bin:$PATH"
 echo "GitHub CLI ready: $gh_root/current/bin/gh"
+if (( ! skip_gh_auth )); then
+  if ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    if [[ ! -t 0 ]]; then
+      echo 'GitHub login required. Rerun setup in a terminal, supply GH_TOKEN or GITHUB_TOKEN, or use --skip-gh-auth.' >&2
+      exit 2
+    fi
+    echo 'Sign in to GitHub. The token will be stored as a file in the private persistent gh directory.'
+    (umask 077; gh auth login --hostname github.com --git-protocol https --web --insecure-storage)
+  fi
+  # Restore Git's credential helper even when the container home is new.
+  gh auth setup-git --hostname github.com
+  if [[ -f $GH_CONFIG_DIR/hosts.yml ]]; then
+    chmod 600 -- "$GH_CONFIG_DIR/hosts.yml"
+  fi
+  echo 'GitHub authentication ready; Git uses gh for HTTPS credentials.'
+fi
 
 # The daemon requires its control directory to be private. A migrated Codex
 # install may also retain an absolute link to the previous mount's package.

@@ -70,7 +70,7 @@ class SetupTests(unittest.TestCase):
         self.home = self.root / 'home'
         self.home.mkdir()
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_'))}
+                    if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_', 'GH_', 'GITHUB_'))}
         self.env.update(HOME=str(self.home), WEBSTUDIO_PERSIST_ROOT=str(self.persist),
                         WEBSTUDIO_LOCAL_DIR=str(self.local), TERM='xterm')
         self.executable(self.persist / 'tools/gh/2.103.3/bin/gh', '#!/bin/sh\nexit 0\n')
@@ -105,6 +105,62 @@ p.write_text(json.dumps({'auth_mode':'apikey', 'OPENAI_API_KEY':sys.stdin.read()
         terminal = Terminal(script, self.env)
         self.addCleanup(terminal.close)
         return terminal
+
+    def mock_github_auth(self):
+        self.executable(self.persist / 'tools/gh/2.103.3/bin/gh', '''#!/usr/bin/env python3
+import os, pathlib, sys
+state = pathlib.Path(os.environ['GH_CONFIG_DIR'])
+args = sys.argv[1:]
+with (state / 'calls').open('a') as log:
+    log.write(' '.join(args) + '\\n')
+if args[:2] == ['auth', 'status']:
+    sys.exit(0 if (state / 'hosts.yml').exists() or os.environ.get('GH_TOKEN') else 1)
+if args[:2] == ['auth', 'login']:
+    assert '--web' in args and '--insecure-storage' in args
+    if os.environ.get('TEST_GH_LOGIN_FAIL'):
+        sys.exit(1)
+    (state / 'hosts.yml').write_text('test credential')
+if args[:2] == ['auth', 'setup-git']:
+    (pathlib.Path.home() / '.gitconfig').write_text('test credential helper')
+''')
+
+    def test_github_login_survives_new_home(self):
+        self.mock_github_auth()
+        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal.expect('GitHub authentication ready')
+        self.assertEqual(terminal.finish(), 0)
+        credentials = self.state / 'gh/hosts.yml'
+        self.assertEqual(credentials.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(credentials.parent.stat().st_mode & 0o777, 0o700)
+        replacement = self.root / 'replacement-home'
+        replacement.mkdir()
+        self.env['HOME'] = str(replacement)
+        self.run_setup(agents='none', key=None)
+        calls = (self.state / 'gh/calls').read_text()
+        self.assertEqual(calls.count('auth login'), 1)
+        self.assertEqual(calls.count('auth setup-git'), 2)
+        self.assertTrue((replacement / '.gitconfig').exists())
+
+    def test_github_unattended_requires_auth_or_explicit_skip(self):
+        self.mock_github_auth()
+        result = self.run_setup(agents='none', key=None, success=False)
+        self.assertIn('GitHub login required', result.stderr)
+        self.assertNotIn('auth login', (self.state / 'gh/calls').read_text())
+        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none',
+                                 '--skip-vscode', '--skip-gh-auth'], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.env['GH_TOKEN'] = 'test-github-token'
+        self.run_setup(agents='none', key=None)
+        self.assertTrue((self.home / '.gitconfig').exists())
+        self.assertFalse((self.state / 'gh/hosts.yml').exists())
+
+    def test_github_login_failure_stops_setup(self):
+        self.mock_github_auth()
+        self.env['TEST_GH_LOGIN_FAIL'] = '1'
+        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal.expect('Sign in to GitHub.')
+        self.assertNotEqual(terminal.finish(), 0)
+        self.assertFalse((self.home / '.gitconfig').exists())
 
     def test_menu_navigation_toggle_and_cancel(self):
         prefix = f'set -eu; source "{ROOT}/scripts/setup_prompts.sh"; skip_codex=0; skip_claude=0; '

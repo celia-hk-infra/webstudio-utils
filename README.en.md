@@ -137,8 +137,15 @@ argument. Model availability depends on your OpenLux account.
 
 GitHub CLI is installed under `tools/gh` after verifying the official release
 checksum. `shell/init.sh` puts it on `PATH` and sets `GH_CONFIG_DIR` to
-persistent private storage. Authenticate once with `gh auth login`; later shells
-and containers reuse that login.
+persistent private storage. Setup starts GitHub browser login if no valid login
+is available, saves the token as a file in that private directory with mode
+`600`, and configures Git to use `gh` for HTTPS authentication. Later setup runs
+reuse the saved login and restore Git's credential helper after container
+replacement. An expired or revoked token requires login again.
+
+Unattended setup requires a saved login, `GH_TOKEN`, or `GITHUB_TOKEN`.
+Environment tokens must be supplied again in new containers. Use
+`--skip-gh-auth` to install the CLI without setting up GitHub authentication.
 
 ## After a container restart
 
