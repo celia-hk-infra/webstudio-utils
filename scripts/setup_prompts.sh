@@ -54,3 +54,17 @@ prompt_openlux_key() {
     return 2
   fi
 }
+
+# Default to no on Enter or EOF; retry unrecognized answers.
+prompt_yes_no() {
+  local answer
+  while :; do
+    printf '%s' "$1"
+    IFS= read -r answer || { printf '\n'; return 1; }
+    case $answer in
+      y|Y|yes|YES|Yes) return 0 ;;
+      ''|n|N|no|NO|No) return 1 ;;
+      *) printf 'Please enter y or n.\n' ;;
+    esac
+  done
+}

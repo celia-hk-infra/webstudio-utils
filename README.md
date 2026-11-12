@@ -24,6 +24,10 @@ source shell/init.sh                           # 为当前终端加载环境
 codex resume                                   # 也可直接运行 codex
 ```
 
+安装脚本还会通过 Conda 将 tmux 及其依赖安装到持久化存储的 `tools/tmux` 中，并使其在新终端中可用。首次安装需要 Conda，即使使用了 `--skip-vscode` 也一样。后续安装会复用该目录中的 tmux。容器更换后，正在运行的 tmux 会话会结束。
+
+交互式安装结束后，会询问是否立即启动 VS Code 隧道（默认不启动）。选择是后，隧道启动脚本会在前台运行；请保持终端打开，按 Ctrl+C 可停止隧道。使用 `--start-tunnel` 可自动启动，使用 `--no-start-tunnel` 可跳过询问。无人值守运行默认不启动隧道，除非显式指定。`--skip-vscode` 会跳过隧道安装及启动询问，不能与 `--start-tunnel` 同时使用。
+
 安装脚本会保存隧道名称，后续容器直接运行 `./setup_container.sh` 即可，无需再传入 `--tunnel-name`。脚本可以安全地重复运行。要在终端启动 VS Code 隧道，请运行：
 
 ```bash
@@ -43,6 +47,7 @@ codex resume                                   # 也可直接运行 codex
 | `user-sfs/.webstudio-tunnel` | 隧道名称及 VS Code CLI 身份与登录数据 |
 | `user-sfs/tools` 和 `cache` | 固定版本的 CLI 软件包、VS Code 运行环境及下载缓存 |
 | `user-sfs/tools/gh` | 供新终端和新容器共用的 GitHub CLI 可执行文件 |
+| `user-sfs/tools/tmux` | tmux 及其 Conda 依赖 |
 | `/tmp/webstudio-$UID` | 本地 CLI 副本、VS Code CLI 及 VS Code 服务端 |
 
 固定版本在 `setup_container.sh` 中定义：
@@ -92,6 +97,8 @@ GitHub CLI 在验证官方发布文件的校验和后，会安装到 `tools/gh` 
 无人值守安装需要已有的登录状态、`GH_TOKEN` 或 `GITHUB_TOKEN`。通过环境变量提供的令牌需要在新容器中重新设置。使用 `--skip-gh-auth` 可仅安装 CLI，跳过 GitHub 认证配置。
 
 ## 容器重启后
+
+在尚未完成安装时加载 `shell/init.sh`，脚本会检查 `WEBSTUDIO_LOCAL_DIR` 中的完成标记，并询问是否运行安装脚本。选择否后，终端仍可使用，同时会显示供之后运行的命令。没有终端时，脚本会显示命令并返回非零状态，不会等待输入。完成标记仅在安装成功后写入；请将 `WEBSTUDIO_LOCAL_DIR` 保持在容器本地的临时存储上，以便检测容器更换。
 
 更换容器会清除主目录中的链接和本地可执行文件副本。重新运行安装脚本即可从持久化挂载目录恢复这些内容。仅保存在已清空的主目录中的状态无法恢复。
 

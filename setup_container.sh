@@ -15,11 +15,12 @@ skip_claude=0
 skip_codex=0
 skip_vscode=0
 skip_gh_auth=0
+start_tunnel=ask
 tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 Then enter your OpenLux API key once for the selected agents.
@@ -28,8 +29,10 @@ all selected agents already have saved credentials.
 GitHub login is required unless --skip-gh-auth is set. Interactive setup starts
 browser login and saves the token in private persistent storage. Unattended
 setup needs a saved GitHub login, GH_TOKEN, or GITHUB_TOKEN.
-Prepare persistent agent state and tools, stage CLIs on local disk, and install
-the VS Code tunnel CLI. Start the tunnel separately with:
+Install tmux in persistent storage using Conda, prepare agent tools, and install
+the VS Code tunnel CLI. Interactive setup offers to start the tunnel afterward.
+Use --start-tunnel or --no-start-tunnel to choose without a prompt.
+Start the tunnel separately with:
   ./scripts/start_vscode_tunnel.sh
 
 Set WEBSTUDIO_CODEX_VERSION to pin a different Codex CLI version.
@@ -54,10 +57,17 @@ while (($#)); do
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
     --skip-gh-auth) skip_gh_auth=1; shift ;;
+    --start-tunnel) start_tunnel=yes; shift ;;
+    --no-start-tunnel) start_tunnel=no; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if (( skip_vscode )) && [[ $start_tunnel == yes ]]; then
+  echo '--start-tunnel cannot be combined with --skip-vscode.' >&2
+  exit 2
+fi
 
 if [[ -n $agents ]]; then
   case $agents in
@@ -85,6 +95,7 @@ fi
 }
 
 persist_root=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$repo_dir/.." && pwd -P)}
+export WEBSTUDIO_SETUP_RUNNING=1
 WEBSTUDIO_REPORT_LINK_CONFLICTS=1 source "$repo_dir/shell/init.sh"
 setup_api_key=
 export -n setup_api_key
@@ -141,6 +152,29 @@ if (( ! skip_gh_auth )); then
   fi
   echo 'GitHub authentication ready; Git uses gh for HTTPS credentials.'
 fi
+
+# Keep tmux and its libraries together on the persistent mount.
+tmux_prefix="$WEBSTUDIO_PERSIST_ROOT/tools/tmux"
+if [[ ! -x $tmux_prefix/bin/tmux ]]; then
+  conda_bin=${CONDA_EXE:-}
+  if [[ -z $conda_bin ]]; then
+    if command -v conda >/dev/null 2>&1; then
+      conda_bin=conda
+    elif [[ -x /opt/huawei/miniconda/envs/python39/bin/conda ]]; then
+      conda_bin=/opt/huawei/miniconda/envs/python39/bin/conda
+    else
+      echo 'Conda is required to install tmux. Set CONDA_EXE=/path/to/conda and rerun.' >&2
+      exit 1
+    fi
+  fi
+  conda_action=create
+  [[ ! -d $tmux_prefix/conda-meta ]] || conda_action=install
+  echo 'Installing tmux to persistent storage...'
+  "$conda_bin" "$conda_action" --yes --prefix "$tmux_prefix" --solver classic \
+    --override-channels --channel conda-forge --repodata-fn current_repodata.json tmux
+fi
+"$tmux_prefix/bin/tmux" -V
+export PATH="$tmux_prefix/bin:$PATH"
 
 # The daemon requires its control directory to be private. A migrated Codex
 # install may also retain an absolute link to the previous mount's package.
@@ -279,3 +313,20 @@ printf 'Persistent state: %s\nTunnel name: %s\n' "$WEBSTUDIO_PERSIST_ROOT" "$tun
 printf 'For this shell: source %q\n' "$repo_dir/shell/init.sh"
 printf 'To start VS Code: %q\n' "$repo_dir/scripts/start_vscode_tunnel.sh"
 echo 'Selected agents are configured. Load shell/init.sh in this terminal, then run codex or claude.'
+
+# Only mark a fully completed setup; local storage is reset on replacement.
+printf '%s\n' "$repo_dir" > "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
+chmod 600 -- "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
+unset WEBSTUDIO_SETUP_RUNNING
+if (( ! skip_vscode )); then
+  if [[ $start_tunnel == ask && -t 0 ]]; then
+    source "$repo_dir/scripts/setup_prompts.sh"
+    if prompt_yes_no 'Start the VS Code tunnel now? [y/N] '; then
+      start_tunnel=yes
+    fi
+  fi
+  if [[ $start_tunnel == yes ]]; then
+    echo 'Keep this terminal open while using the tunnel. Ctrl+C stops it.'
+    exec "$repo_dir/scripts/start_vscode_tunnel.sh"
+  fi
+fi

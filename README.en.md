@@ -27,6 +27,19 @@ source shell/init.sh                           # for this terminal's environment
 codex resume                                   # or simply: codex
 ```
 
+Setup also installs tmux with its dependencies under `tools/tmux` on persistent
+storage and makes it available in new shells. Conda is required for the first
+installation, including when using `--skip-vscode`. Existing tmux installations
+in that directory are reused. Running tmux sessions end when the container is
+replaced.
+
+After setup, interactive runs ask whether to start the VS Code tunnel (default:
+No). Choosing Yes runs the tunnel launcher in the foreground; keep the terminal
+open, and press Ctrl+C to stop it. Use `--start-tunnel` to start automatically or
+`--no-start-tunnel` to skip the question. Unattended runs do not start the tunnel
+unless explicitly requested. `--skip-vscode` skips both tunnel installation and
+the start question, and cannot be combined with `--start-tunnel`.
+
 The setup script saves the tunnel name, so later containers can run
 `./setup_container.sh` without `--tunnel-name`. It is safe to rerun. To start
 the VS Code tunnel in a terminal, run:
@@ -55,6 +68,7 @@ Tunnel names can be at most 20 letters, digits, or hyphens. Use
 | `user-sfs/.webstudio-tunnel` | Tunnel name and VS Code CLI identity/sign-in data |
 | `user-sfs/tools` and `cache` | Pinned CLI packages, VS Code runtime, and download cache |
 | `user-sfs/tools/gh` | GitHub CLI binary, shared by new shells and containers |
+| `user-sfs/tools/tmux` | tmux and its Conda dependencies |
 | `/tmp/webstudio-$UID` | Local CLI copies, VS Code CLI, and VS Code server |
 
 Pinned versions live in `setup_container.sh`:
@@ -148,6 +162,13 @@ Environment tokens must be supplied again in new containers. Use
 `--skip-gh-auth` to install the CLI without setting up GitHub authentication.
 
 ## After a container restart
+
+When you source `shell/init.sh` before setup, it checks for a completion marker
+in `WEBSTUDIO_LOCAL_DIR` and offers to run setup. Choosing No leaves the shell
+usable and prints the command to run later. Without a terminal, it prints the
+command and returns a nonzero status instead of prompting. The marker is written
+only after successful setup; keep `WEBSTUDIO_LOCAL_DIR` on local, disposable
+storage so a replacement container is detected.
 
 Container replacement wipes home-directory links and local executable copies.
 Rerunning setup restores those from the persistent mount. It does not recover

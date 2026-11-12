@@ -10,6 +10,36 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     exit 2
 fi
 
+# Check before installing hooks or creating state. Setup bypasses this guard.
+_webstudio_init_repo=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P) || return 1
+_webstudio_setup_marker="${WEBSTUDIO_LOCAL_DIR:-/tmp/webstudio-${UID}}/.setup-complete"
+if [[ ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 ]] &&
+    { [[ ! -f $_webstudio_setup_marker ]] || [[ $(cat -- "$_webstudio_setup_marker") != "$_webstudio_init_repo" ]]; }; then
+    printf 'This container has not been set up yet.\n'
+    if [[ -t 0 ]]; then
+        source "$_webstudio_init_repo/scripts/setup_prompts.sh"
+        if prompt_yes_no 'Run container setup now? [y/N] '; then
+            if ! bash "$_webstudio_init_repo/setup_container.sh"; then
+                # Stopping the optional foreground tunnel does not undo setup.
+                if [[ ! -f $_webstudio_setup_marker ]] || [[ $(cat -- "$_webstudio_setup_marker") != "$_webstudio_init_repo" ]]; then
+                    printf 'Setup did not finish successfully. Rerun setup_container.sh to continue.\n' >&2
+                    unset _webstudio_init_repo _webstudio_setup_marker
+                    return 1
+                fi
+            fi
+        else
+            printf 'When ready, run: bash %q\n' "$_webstudio_init_repo/setup_container.sh"
+            unset _webstudio_init_repo _webstudio_setup_marker
+            return 0
+        fi
+    else
+        printf 'Run: bash %q\n' "$_webstudio_init_repo/setup_container.sh" >&2
+        unset _webstudio_init_repo _webstudio_setup_marker
+        return 1
+    fi
+fi
+unset _webstudio_init_repo _webstudio_setup_marker
+
 # Store private agent state on the mount containing this repository, outside Git.
 _webstudio_shell_dir=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")") || return 1
 WEBSTUDIO_PERSIST_ROOT=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$_webstudio_shell_dir/../.." && pwd -P)}
@@ -112,6 +142,16 @@ if [[ -x "$_webstudio_gh_bin/gh" ]]; then
     esac
 fi
 unset _webstudio_gh_bin
+
+# tmux's Conda environment is persistent and does not need activation.
+_webstudio_tmux_bin="$WEBSTUDIO_PERSIST_ROOT/tools/tmux/bin"
+if [[ -x $_webstudio_tmux_bin/tmux ]]; then
+    case ":$PATH:" in
+        *":$_webstudio_tmux_bin:"*) ;;
+        *) export PATH="$_webstudio_tmux_bin:$PATH" ;;
+    esac
+fi
+unset _webstudio_tmux_bin
 
 # /etc/profile sets TMOUT=300, which closes an idle interactive Bash shell.
 unset TMOUT

@@ -6,6 +6,7 @@ from pathlib import Path
 import pty
 import select
 import signal
+import shutil
 import subprocess
 import tempfile
 import time
@@ -73,6 +74,7 @@ class SetupTests(unittest.TestCase):
                     if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_', 'GH_', 'GITHUB_'))}
         self.env.update(HOME=str(self.home), WEBSTUDIO_PERSIST_ROOT=str(self.persist),
                         WEBSTUDIO_LOCAL_DIR=str(self.local), TERM='xterm')
+        self.executable(self.persist / 'tools/tmux/bin/tmux', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/gh/2.103.3/bin/gh', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/claude/2.1.322/node_modules/.bin/claude', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/codex/0.166.0/node_modules/.bin/codex', '''#!/usr/bin/env python3
@@ -140,6 +142,7 @@ if args[:2] == ['auth', 'setup-git']:
         self.assertEqual(calls.count('auth login'), 1)
         self.assertEqual(calls.count('auth setup-git'), 2)
         self.assertTrue((replacement / '.gitconfig').exists())
+        self.assertTrue((self.local / '.setup-complete').exists())
 
     def test_github_unattended_requires_auth_or_explicit_skip(self):
         self.mock_github_auth()
@@ -161,6 +164,77 @@ if args[:2] == ['auth', 'setup-git']:
         terminal.expect('Sign in to GitHub.')
         self.assertNotEqual(terminal.finish(), 0)
         self.assertFalse((self.home / '.gitconfig').exists())
+        self.assertFalse((self.local / '.setup-complete').exists())
+
+    def test_tmux_install_and_reuse(self):
+        (self.persist / 'tools/tmux/bin/tmux').unlink()
+        conda = self.root / 'conda'
+        self.executable(conda, '''#!/usr/bin/env python3
+import pathlib, sys
+prefix = pathlib.Path(sys.argv[sys.argv.index('--prefix') + 1])
+(prefix / 'conda-called').touch()
+binary = prefix / 'bin/tmux'
+binary.write_text('#!/bin/sh\\nexit 0\\n')
+binary.chmod(0o700)
+''')
+        self.env['CONDA_EXE'] = str(conda)
+        self.run_setup(agents='none', key=None)
+        self.assertTrue((self.persist / 'tools/tmux/conda-called').exists())
+        conda.unlink()
+        self.run_setup(agents='none', key=None)
+        result = subprocess.run(['bash', '-c', f'source "{ROOT}/shell/init.sh"; command -v tmux'],
+                                env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.stdout.strip(), str(self.persist / 'tools/tmux/bin/tmux'))
+
+    def test_init_decline_and_noninteractive_guidance(self):
+        terminal = self.terminal(f'source "{ROOT}/shell/init.sh"; echo SHELL_ALIVE')
+        terminal.expect('Run container setup now?')
+        terminal.send(b'n\r')
+        terminal.expect('SHELL_ALIVE')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertFalse(self.local.exists())
+        result = subprocess.run(['bash', '-c', f'source "{ROOT}/shell/init.sh"'],
+                                env=self.env, text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('setup_container.sh', result.stderr)
+
+    def test_tunnel_prompt_and_init_accept(self):
+        repo = self.root / 'repo'
+        shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+        self.executable(repo / 'scripts/start_vscode_tunnel.sh', '''#!/bin/sh
+printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
+''')
+        self.env['OPENLUX_API_KEY'] = KEY
+        terminal = self.terminal(f'source "{repo}/shell/init.sh"; printf "LOADED:%s" "$CODEX_HOME"')
+        terminal.expect('Run container setup now?')
+        terminal.send(b'y\r')
+        terminal.expect('[x] Claude Code')
+        terminal.send(b'\r')
+        terminal.expect('Start the VS Code tunnel now?')
+        terminal.send(b'y\r')
+        terminal.expect('LOADED:' + str(self.state / '.codex'))
+        self.assertEqual(terminal.finish(), 0)
+        calls = self.persist / 'tunnel-calls'
+        self.assertEqual(calls.read_text().splitlines(), ['--install-only', 'started'])
+        self.assertTrue((self.local / '.setup-complete').exists())
+        terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none')
+        terminal.expect('Start the VS Code tunnel now?')
+        terminal.send(b'n\r')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertEqual(calls.read_text().splitlines(), ['--install-only', 'started', '--install-only'])
+        for flags, expected in [([], ['--install-only']), (['--start-tunnel'], ['--install-only', 'started']),
+                                (['--no-start-tunnel'], ['--install-only'])]:
+            calls.write_text('')
+            result = subprocess.run(['bash', str(repo / 'setup_container.sh'), '--agents', 'none', *flags],
+                                    env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls.read_text().splitlines(), expected)
+        (self.local / '.setup-complete').unlink()
+        terminal = self.terminal(f'source "{repo}/shell/init.sh"')
+        terminal.expect('Run container setup now?')
+        terminal.send(b'n\r')
+        self.assertEqual(terminal.finish(), 0)
+
 
     def test_menu_navigation_toggle_and_cancel(self):
         prefix = f'set -eu; source "{ROOT}/scripts/setup_prompts.sh"; skip_codex=0; skip_claude=0; '
