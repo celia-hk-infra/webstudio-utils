@@ -427,5 +427,51 @@ echo 'code 1.0.0'
         self.assertEqual(settings.read_bytes(), before)
 
 
+    def test_stale_hook_removed_from_startup_files(self):
+        """init.sh prunes hooks from other clones so they don't re-trigger setup."""
+        # Simulate a home that previously ran setup from a different clone.
+        stale = str(self.root / 'old-clone/shell/init.sh')
+        current = str(ROOT / 'shell/init.sh')
+        for f in (self.home / '.bashrc', self.home / '.bash_profile'):
+            f.write_text(
+                f'export A=1\n'
+                f'source {stale} # webstudio shell init\n'
+                f'alias x=y\n'
+            )
+        # Write the setup marker pointing at ROOT (the current clone).
+        self.local.mkdir(parents=True, exist_ok=True)
+        (self.local / '.setup-complete').write_text(str(ROOT) + '\n')
+        (self.local / '.setup-complete').chmod(0o600)
+        # Sourcing init.sh should succeed and clean up the stale hook.
+        result = subprocess.run(
+            ['bash', '-c', f'source "{current}"; echo OK'],
+            env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('OK', result.stdout)
+        for path in (self.home / '.bashrc', self.home / '.bash_profile'):
+            contents = path.read_text()
+            self.assertNotIn(stale, contents, f'stale hook still in {path.name}')
+            self.assertIn(f'source {current} # webstudio shell init', contents)
+            # Unrelated lines must be preserved.
+            self.assertIn('export A=1', contents)
+            self.assertIn('alias x=y', contents)
+
+    def test_stale_hook_not_added_twice(self):
+        """Running init.sh a second time does not duplicate the hook."""
+        self.local.mkdir(parents=True, exist_ok=True)
+        (self.local / '.setup-complete').write_text(str(ROOT) + '\n')
+        (self.local / '.setup-complete').chmod(0o600)
+        current = str(ROOT / 'shell/init.sh')
+        for _ in range(2):
+            subprocess.run(
+                ['bash', '-c', f'source "{current}"'],
+                env=self.env, check=True, capture_output=True,
+            )
+        for path in (self.home / '.bashrc', self.home / '.bash_profile'):
+            count = path.read_text().count(f'source {current} # webstudio shell init')
+            self.assertEqual(count, 1, f'hook duplicated in {path.name}')
+
+
 if __name__ == '__main__':
     unittest.main()

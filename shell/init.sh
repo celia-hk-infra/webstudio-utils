@@ -100,6 +100,13 @@ _webstudio_install_hook() {
     if [[ -f $file ]] && grep -Fqx -- '[ "$DISABLE_MA_USER_BASHRC" != "true" ] && source /home/ma-user/.bashrc' "$file"; then
         sed -i --follow-symlinks 's|^\[ "$DISABLE_MA_USER_BASHRC" != "true" \] \&\& source /home/ma-user/.bashrc$|[ "$DISABLE_MA_USER_BASHRC" != "true" ] \&\& [ -f /home/ma-user/.bashrc ] \&\& source /home/ma-user/.bashrc|' "$file" || return 1
     fi
+    # Drop hooks from other clones: the setup marker names one repository,
+    # so an earlier hook would report the container as not set up.
+    if [[ -f $file ]] && grep -v -Fx -- "$hook" "$file" | grep -q ' # webstudio shell init$'; then
+        local filtered
+        filtered=$(keep=$hook awk '!/^source .* # webstudio shell init$/ || $0 == ENVIRON["keep"]' "$file") || return 1
+        printf '%s\n' "$filtered" > "$file" || return 1
+    fi
     if ! grep -Fqx -- "$hook" "$file" 2>/dev/null; then
         printf '\n%s\n' "$hook" >> "$file" || return 1
     fi
