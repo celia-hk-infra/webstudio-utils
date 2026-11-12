@@ -1,203 +1,125 @@
+简体中文 | [English](README.en.md)
+
 # webstudio-utils
 
-Bootstrap a new WebStudio container from a checkout on any filesystem. The setup
-script uses the checkout's parent directory for persistent data; set
-`WEBSTUDIO_PERSIST_ROOT` to use a different location.
+通过任意文件系统上的仓库副本，快速初始化新的 WebStudio 容器。安装脚本默认将仓库的父目录用于持久化数据；可通过 `WEBSTUDIO_PERSIST_ROOT` 指定其他位置。
 
-- [New container](#new-container)
-- [What lives where](#what-lives-where)
-- [Choosing agents](#choosing-agents)
-- [Credentials and gateway configuration](#credentials-and-gateway-configuration)
-- [After a container restart](#after-a-container-restart)
-- [Moving existing Codex history](#moving-existing-codex-history)
-- [Troubleshooting](#troubleshooting)
-- [Options](#options)
+- [初始化新容器](#初始化新容器)
+- [目录与文件存放位置](#目录与文件存放位置)
+- [选择智能体](#选择智能体)
+- [凭据与网关配置](#凭据与网关配置)
+- [容器重启后](#容器重启后)
+- [迁移已有的 Codex 历史记录](#迁移已有的-codex-历史记录)
+- [故障排查](#故障排查)
+- [可用选项](#可用选项)
 
-## New container
+## 初始化新容器
 
-Keep the checkout on a persistent mount that preserves Unix permissions, for
-example `/home/user/work/dataset/user-sfs/webstudio-utils`:
+请将仓库放在支持保留 Unix 权限的持久化挂载目录中，例如 `/home/user/work/dataset/user-sfs/webstudio-utils`：
 
 ```bash
 cd /home/user/work/dataset/user-sfs/webstudio-utils
-./setup_container.sh --tunnel-name my-jupyter  # choose a name on the first run
-source shell/init.sh                           # for this terminal's environment
-codex resume                                   # or simply: codex
+./setup_container.sh --tunnel-name my-jupyter  # 首次运行时指定隧道名称
+source shell/init.sh                           # 为当前终端加载环境
+codex resume                                   # 也可直接运行 codex
 ```
 
-The setup script saves the tunnel name, so later containers can run
-`./setup_container.sh` without `--tunnel-name`. It is safe to rerun. To start
-the VS Code tunnel in a terminal, run:
+安装脚本会保存隧道名称，后续容器直接运行 `./setup_container.sh` 即可，无需再传入 `--tunnel-name`。脚本可以安全地重复运行。要在终端启动 VS Code 隧道，请运行：
 
 ```bash
 ./scripts/start_vscode_tunnel.sh
 ```
 
-Keep that process running while using VS Code. The tunnel launcher also sources
-`shell/init.sh`, so it passes the agent environment to VS Code terminals. It
-preserves the tunnel's CLI identity and sign-in data on persistent storage, and
-reuses the saved name. The server installation runs on local `/tmp` storage and
-is rebuilt when a container is replaced. A sign-in may still be needed if the
-stored credential expires or is revoked. Do not run the same tunnel identity
-from two containers at once.
+使用 VS Code 期间，请保持该进程运行。隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在持久化存储中保留隧道的 CLI 身份与登录数据，并复用已保存的名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
 
-Tunnel names can be at most 20 letters, digits, or hyphens. Use
-`./setup_container.sh --tunnel-name SHORT-NAME` to change a saved name.
+隧道名称最多为 20 个字符，只能包含字母、数字或连字符。可运行 `./setup_container.sh --tunnel-name SHORT-NAME` 修改已保存的名称。
 
-## What lives where
+## 目录与文件存放位置
 
-| Location | Contents |
+| 位置 | 内容 |
 | --- | --- |
-| `user-sfs/.webstudio-agent-home` | Codex sessions, history, configuration, and other agent state |
-| `user-sfs/.webstudio-agent-home/gh` | GitHub CLI login data |
-| `user-sfs/.webstudio-tunnel` | Tunnel name and VS Code CLI identity/sign-in data |
-| `user-sfs/tools` and `cache` | Pinned CLI packages, VS Code runtime, and download cache |
-| `user-sfs/tools/gh` | GitHub CLI binary, shared by new shells and containers |
-| `/tmp/webstudio-$UID` | Local CLI copies, VS Code CLI, and VS Code server |
+| `user-sfs/.webstudio-agent-home` | Codex 会话、历史记录、配置及其他智能体状态 |
+| `user-sfs/.webstudio-agent-home/gh` | GitHub CLI 登录数据 |
+| `user-sfs/.webstudio-tunnel` | 隧道名称及 VS Code CLI 身份与登录数据 |
+| `user-sfs/tools` 和 `cache` | 固定版本的 CLI 软件包、VS Code 运行环境及下载缓存 |
+| `user-sfs/tools/gh` | 供新终端和新容器共用的 GitHub CLI 可执行文件 |
+| `/tmp/webstudio-$UID` | 本地 CLI 副本、VS Code CLI 及 VS Code 服务端 |
 
-Pinned versions live in `setup_container.sh`:
+固定版本在 `setup_container.sh` 中定义：
 
-| Tool | Version | Override |
+| 工具 | 版本 | 覆盖变量 |
 | --- | --- | --- |
 | Codex CLI | `0.166.0` | `WEBSTUDIO_CODEX_VERSION` |
 | Claude Code | `2.1.322` | `WEBSTUDIO_CLAUDE_VERSION` |
 | GitHub CLI | `2.103.3` | `WEBSTUDIO_GH_VERSION` |
 
-The first setup downloads each package to persistent storage; every fresh
-container copies it to local disk. The VS Code CLI download is also cached on
-persistent storage, then extracted locally. The Conda runtime for the VS Code
-server stays on persistent storage. The script needs `node`, `npm`, `conda`,
-`curl`, and `tar` in the container; the tunnel launcher checks its platform
-requirements.
+首次安装会将各软件包下载到持久化存储；每个新容器再将其复制到本地磁盘。VS Code CLI 的下载文件也会缓存在持久化存储中，然后在本地解压。VS Code 服务端使用的 Conda 运行环境保留在持久化存储中。容器内需要有 `node`、`npm`、`conda`、`curl` 和 `tar`；隧道启动脚本会检查平台要求。
 
-## Choosing agents
+## 选择智能体
 
-Setup displays a checklist in a terminal: use Up/Down to move, Space to select
-or deselect, and Enter to continue. Both agents are selected initially; press
-`q` to cancel. Next, enter your OpenLux API key at the hidden prompt. Setup
-saves it for every selected agent, so no separate login is needed. On reruns,
-Enter keeps existing credentials if all selected agents have keys.
+在终端中运行安装脚本时，会显示选择菜单：使用上下方向键移动，空格键选中或取消选中，回车键继续。默认选中两个智能体；按 `q` 取消。随后，在隐藏输入的提示中输入 OpenLux API 密钥。安装脚本会为所有选中的智能体保存密钥，无需分别登录。再次运行时，如果所有选中的智能体都已有密钥，直接按回车即可保留现有凭据。
 
-For scripts (no selection menu), use:
+在脚本中运行（不显示选择菜单）时，请使用：
 
 ```bash
 ./setup_container.sh --agents both --skip-vscode
-# Other choices: --agents codex, --agents claude, --agents none
+# 其他选项：--agents codex、--agents claude、--agents none
 source shell/init.sh
 ```
 
-Without a terminal, setup defaults to both. Supply `OPENLUX_API_KEY` through
-your environment or secret manager unless all selected agents already have
-saved keys. Missing credentials stop setup before downloads. Selecting
-`--agents none` skips the key prompt. `--skip-codex` and `--skip-claude`
-exclude an agent without showing the menu. Skipping an agent does not uninstall
-it.
+没有终端时，默认安装两个智能体。除非所有选中的智能体都已有保存的密钥，否则需要通过环境变量或密钥管理器提供 `OPENLUX_API_KEY`。如果缺少凭据，安装会在下载前停止。选择 `--agents none` 会跳过密钥提示。`--skip-codex` 和 `--skip-claude` 会排除对应智能体，并且不显示选择菜单。跳过某个智能体不会卸载它。
 
-Both CLIs are cached under `tools/<agent>/<version>` and staged locally under
-`/tmp/webstudio-$UID`. Downloads use `https://registry.npmmirror.com` by
-default; set `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` to use the
-official registry instead. This does not change global npm settings.
+两个 CLI 都缓存在 `tools/<agent>/<version>` 中，并复制到本地 `/tmp/webstudio-$UID` 下供运行使用。默认通过 `https://registry.npmmirror.com` 下载；设置 `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` 可改用官方源。这不会修改全局 npm 设置。
 
-## Credentials and gateway configuration
+## 凭据与网关配置
 
-Both agents are configured for OpenLux.
+两个智能体均配置为使用 OpenLux。
 
-**Codex.** Setup sets the top-level `openai_base_url` in `$CODEX_HOME/config.toml`
-to `"https://api.openlux.ai/v1"`, preserving other settings, and sets
-`cli_auth_credentials_store = "file"` so authentication persists in
-`$CODEX_HOME/auth.json`. The key is passed with
-`codex login --with-api-key` over stdin. Rerunning setup reapplies this URL;
-`--skip-codex` skips it.
+**Codex。** 安装脚本会将 `$CODEX_HOME/config.toml` 中的顶层 `openai_base_url` 设为 `"https://api.openlux.ai/v1"`，保留其他设置，并设置 `cli_auth_credentials_store = "file"`，使认证信息持久化保存在 `$CODEX_HOME/auth.json` 中。密钥通过标准输入传给 `codex login --with-api-key`。重复运行安装脚本会重新应用该 URL；使用 `--skip-codex` 可跳过此步骤。
 
-**Claude Code.** Setup sets `https://api.openlux.ai` as `ANTHROPIC_BASE_URL` in
-both persistent `$CLAUDE_CONFIG_DIR/settings.json` and the shell environment.
-Claude appends `/v1/messages` itself. `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`
-loads available Claude models from OpenLux's authenticated `/v1/models`
-endpoint into `/model`, including newly advertised releases. Setup removes the
-old `CLAUDE_CODE_USE_GATEWAY` setting, which disables discovery in this CLI
-version.
+**Claude Code。** 安装脚本会在持久化的 `$CLAUDE_CONFIG_DIR/settings.json` 和 shell 环境中，将 `ANTHROPIC_BASE_URL` 设为 `https://api.openlux.ai`。Claude 会自行追加 `/v1/messages`。`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 会通过 OpenLux 需要认证的 `/v1/models` 接口，将可用的 Claude 模型加载到 `/model` 中，包括接口新公布的版本。安装脚本会移除旧的 `CLAUDE_CODE_USE_GATEWAY` 设置，因为在此 CLI 版本中，该设置会禁用模型发现功能。
 
-A few details worth knowing:
+需要了解的细节：
 
-- Discovery requires `ANTHROPIC_AUTH_TOKEN` containing your OpenLux key. Setup
-  saves the entered key there as `env.ANTHROPIC_AUTH_TOKEN`.
-- Discovery updates the picker; it does not automatically switch your selected
-  model. Setup does not pin model IDs. Existing model preferences are
-  preserved, so remove any old 4.x pins yourself to stop using those defaults.
-- Setup marks first-run onboarding complete in the persistent
-  `$CLAUDE_CONFIG_DIR/.claude.json`. Otherwise onboarding checks Anthropic's
-  OAuth endpoints even when the OpenLux API URL is configured.
+- 模型发现需要 `ANTHROPIC_AUTH_TOKEN` 中包含 OpenLux 密钥。安装脚本会将输入的密钥保存为 `env.ANTHROPIC_AUTH_TOKEN`。
+- 模型发现会更新模型选择列表，但不会自动切换当前选中的模型。安装脚本不会固定模型 ID，并会保留现有模型偏好。如果不想继续使用旧的默认模型，请自行移除固定到 4.x 版本的设置。
+- 安装脚本会在持久化的 `$CLAUDE_CONFIG_DIR/.claude.json` 中将首次使用引导标记为已完成。否则，即使配置了 OpenLux API URL，引导流程仍会检查 Anthropic 的 OAuth 接口。
 
-Credentials are saved outside Git with mode `600` in the private persistent
-agent directory. A new key replaces the selected agents' API credentials; other
-preferences are preserved. Setup never prints the key or passes it as a command
-argument. Model availability depends on your OpenLux account.
+凭据以 `600` 权限保存在 Git 仓库之外的私有持久化智能体目录中。输入新密钥会替换所选智能体的 API 凭据，其他偏好设置保持不变。安装脚本不会打印密钥，也不会将其作为命令行参数传递。可用模型取决于你的 OpenLux 账户。
 
-GitHub CLI is installed under `tools/gh` after verifying the official release
-checksum. `shell/init.sh` puts it on `PATH` and sets `GH_CONFIG_DIR` to
-persistent private storage. Authenticate once with `gh auth login`; later shells
-and containers reuse that login.
+GitHub CLI 在验证官方发布文件的校验和后，会安装到 `tools/gh` 下。`shell/init.sh` 会将其加入 `PATH`，并将 `GH_CONFIG_DIR` 指向私有持久化存储。使用 `gh auth login` 登录一次后，后续终端和容器会复用该登录状态。
 
-## After a container restart
+## 容器重启后
 
-Container replacement wipes home-directory links and local executable copies.
-Rerunning setup restores those from the persistent mount. It does not recover
-state that was stored only in the wiped home directory.
+更换容器会清除主目录中的链接和本地可执行文件副本。重新运行安装脚本即可从持久化挂载目录恢复这些内容。仅保存在已清空的主目录中的状态无法恢复。
 
-`shell/init.sh` links persistent agent directories into `$HOME` and appends an
-idempotent startup hook to `.bashrc` and the active Bash login profile,
-preserving existing configuration. This supports both login and regular
-interactive terminals, including root containers. It sets `CODEX_HOME`,
-`CLAUDE_CONFIG_DIR`, and `GH_CONFIG_DIR`, clears Bash `TMOUT`, and puts staged
-CLIs on `PATH`. The setup also checks that Codex's daemon control directory is
-private and repairs a migrated daemon package link that still points to the
-previous mount.
+`shell/init.sh` 会将持久化智能体目录链接到 `$HOME`，并在 `.bashrc` 和当前使用的 Bash 登录配置文件中添加可重复执行而不产生重复内容的启动钩子，同时保留现有配置。登录终端和普通交互式终端均受支持，包括以 root 用户运行的容器。它会设置 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 和 `GH_CONFIG_DIR`，清除 Bash 的 `TMOUT`，并将本地 CLI 加入 `PATH`。安装脚本还会检查 Codex 守护进程控制目录是否为私有目录，并修复迁移后仍指向旧挂载位置的守护进程软件包链接。
 
-Source `shell/init.sh` in the current terminal after setup; future Bash
-terminals load it automatically. Terminals launched with `--norc` need explicit
-sourcing. New Bash terminals load this environment automatically, and saved
-credentials survive container restarts, so no key export or separate login is
-needed:
+安装完成后，在当前终端中加载 `shell/init.sh`；之后新开的 Bash 终端会自动加载。使用 `--norc` 启动的终端需要手动加载。新 Bash 终端会自动加载此环境，保存的凭据也会在容器重启后保留，因此无需再次导出密钥或单独登录：
 
 ```bash
 source shell/init.sh
-codex  # or: claude
+codex  # 或运行 claude
 ```
 
-Run setup as the user who will run the agents. Each user needs their own setup
-and private local staging directory (`/tmp/webstudio-$UID` by default). Setup
-does not change another user's home or share private agent state between users.
-If switching users on the same mount, set `WEBSTUDIO_AGENT_STATE_DIR` to a
-separate directory owned by that user.
+请使用实际运行智能体的用户执行安装。每个用户都需要独立安装，并使用自己的私有本地运行目录（默认为 `/tmp/webstudio-$UID`）。安装脚本不会修改其他用户的主目录，也不会在用户之间共享私有智能体状态。如果在同一挂载目录上切换用户，请将 `WEBSTUDIO_AGENT_STATE_DIR` 设置为该用户拥有的独立目录。
 
-## Moving existing Codex history
+## 迁移已有的 Codex 历史记录
 
-A container may have used both `$HOME/.codex` and an older init script's
-`user/.webstudio-agent-home/.codex`. The new setup does not merge these live
-directories automatically. Identify which one contains the sessions you want,
-stop all Codex processes using that directory, run the new setup once, then copy
-that directory's contents to the new mount:
+容器可能曾同时使用 `$HOME/.codex` 和旧初始化脚本的 `user/.webstudio-agent-home/.codex`。新安装脚本不会自动合并这些正在使用的目录。先确认哪个目录包含需要保留的会话，停止所有使用该目录的 Codex 进程，运行一次新安装脚本，再将该目录的内容复制到新挂载位置：
 
 ```bash
 cp -a /home/user/work/dataset/user/.webstudio-agent-home/.codex/. \
   /home/user/work/dataset/user-sfs/.webstudio-agent-home/.codex/
 ```
 
-To migrate `$HOME/.codex` instead, replace the source path with
-`$HOME/.codex/.`. Do not copy one source over the other without deciding how to
-handle duplicate database and session files. Copy while Codex is stopped so its
-SQLite and session files stay consistent. Codex can reopen saved conversations
-with `codex resume`, but an in-progress command ends when the container dies.
+如果要迁移 `$HOME/.codex`，请将源路径替换为 `$HOME/.codex/.`。在决定如何处理重复的数据库和会话文件之前，不要将一个来源直接覆盖到另一个来源上。复制时应停止 Codex，以保证 SQLite 数据库与会话文件的一致性。可以通过 `codex resume` 重新打开保存的对话，但容器终止时，正在执行的命令也会结束。
 
-## Troubleshooting
+## 故障排查
 
-### Setup reports mode 700
+### 安装脚本提示需要 700 权限
 
-The previous mount reports the agent home as `777`, even after `chmod`.
-Changing permissions repeatedly cannot fix a mount that does not preserve them,
-and credentials must not be kept there. Use a mount that supports private
-directory permissions, such as `user-sfs`. If your shell still carries
-overrides from an older checkout, clear them first:
+旧挂载目录可能始终将智能体主目录的权限显示为 `777`，即使执行 `chmod` 也不改变。反复修改权限无法修复不保留权限的挂载目录，也不应将凭据保存在该位置。请使用支持私有目录权限的挂载目录，例如 `user-sfs`。如果 shell 中仍保留旧仓库设置的覆盖变量，请先清除：
 
 ```bash
 unset WEBSTUDIO_PERSIST_ROOT WEBSTUDIO_AGENT_STATE_DIR WEBSTUDIO_LOCAL_DIR
@@ -206,22 +128,15 @@ cd /home/user/work/dataset/user-sfs/webstudio-utils
 source shell/init.sh
 ```
 
-### Something else went wrong
+### 其他问题
 
-Incomplete installs are never reused. If setup reports a partial `tools/<agent>`
-cache or local staging copy, move that directory aside and rerun. The setup
-replaces files atomically, so an interrupted run leaves no half-written
-configuration.
+不完整的安装不会被复用。如果安装脚本提示 `tools/<agent>` 缓存或本地运行副本不完整，请将对应目录移到其他位置后重新运行。安装脚本以原子方式替换文件，因此执行中断不会留下只写入了一部分的配置文件。
 
-## Options
+## 可用选项
 
 ```bash
 ./setup_container.sh --help
 ./scripts/start_vscode_tunnel.sh --help
 ```
 
-For a quick agent-only setup, use `--skip-vscode`; for a tunnel-only setup, use
-`--agents none`. Set `WEBSTUDIO_PERSIST_ROOT`, `WEBSTUDIO_AGENT_STATE_DIR`, or
-`WEBSTUDIO_LOCAL_DIR` before sourcing `shell/init.sh` to override the defaults.
-The tunnel launcher accepts `CONDA_EXE`, `VSCODE_INSTALL_DIR`,
-`VSCODE_LOCAL_DIR`, `VSCODE_GLIBC_LINKER`, and `VSCODE_CONDA_SOLVER`.
+如需快速安装智能体而跳过 VS Code，请使用 `--skip-vscode`；如只需隧道，请使用 `--agents none`。在加载 `shell/init.sh` 前设置 `WEBSTUDIO_PERSIST_ROOT`、`WEBSTUDIO_AGENT_STATE_DIR` 或 `WEBSTUDIO_LOCAL_DIR`，可覆盖默认路径。隧道启动脚本支持 `CONDA_EXE`、`VSCODE_INSTALL_DIR`、`VSCODE_LOCAL_DIR`、`VSCODE_GLIBC_LINKER` 和 `VSCODE_CONDA_SOLVER`。
