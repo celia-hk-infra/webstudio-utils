@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import shutil
@@ -14,6 +15,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = 'test-openlux-secret'
+ANSI = re.compile(rb'\x1b\[[0-9;?]*[A-Za-z]')
+DOWN = b'\x1b[B'
 
 
 class Terminal:
@@ -26,7 +29,7 @@ class Terminal:
 
     def expect(self, text):
         end = time.monotonic() + 10
-        while text.encode() not in self.output:
+        while text.encode() not in ANSI.sub(b'', self.output):
             if time.monotonic() > end:
                 raise AssertionError(f'Terminal did not show {text!r}: {self.output!r}')
             if select.select([self.fd], [], [], 0.1)[0]:
@@ -199,30 +202,33 @@ binary.chmod(0o700)
         self.assertIn('setup_container.sh', result.stderr)
 
     def test_tunnel_prompt_and_init_accept(self):
-        repo = self.root / 'repo'
-        shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns('.git', '__pycache__'))
-        self.executable(repo / 'scripts/start_vscode_tunnel.sh', '''#!/bin/sh
-printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
-''')
+        repo = self.mock_tunnel_repo()
         self.env['OPENLUX_API_KEY'] = KEY
         terminal = self.terminal(f'source "{repo}/shell/init.sh"; printf "LOADED:%s" "$CODEX_HOME"')
         terminal.expect('Run container setup now?')
         terminal.send(b'y\r')
-        terminal.expect('[x] Claude Code')
+        terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
-        terminal.expect('Start the VS Code tunnel now?')
-        terminal.send(b'y\r')
+        terminal.expect('VS Code tunnel name')
+        terminal.send(b'\r')
+        terminal.expect('Start the VS Code tunnel when setup finishes?')
+        terminal.send(b'\r')
         terminal.expect('LOADED:' + str(self.state / '.codex'))
         self.assertEqual(terminal.finish(), 0)
         calls = self.persist / 'tunnel-calls'
-        self.assertEqual(calls.read_text().splitlines(), ['--install-only', 'started'])
+        self.assertEqual(calls.read_text().splitlines(), ['--install-only', '--background'])
         self.assertTrue((self.local / '.setup-complete').exists())
+        self.assertEqual((self.persist / '.webstudio-tunnel/name').read_text(), 'webstudio-persist\n')
         terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none')
-        terminal.expect('Start the VS Code tunnel now?')
-        terminal.send(b'n\r')
+        terminal.expect('VS Code tunnel name')
+        terminal.send(b'\r')
+        terminal.expect('Start the VS Code tunnel when setup finishes?')
+        terminal.send(DOWN + DOWN + b'\r')
+        terminal.expect('start_vscode_tunnel.sh --background')
         self.assertEqual(terminal.finish(), 0)
-        self.assertEqual(calls.read_text().splitlines(), ['--install-only', 'started', '--install-only'])
-        for flags, expected in [([], ['--install-only']), (['--start-tunnel'], ['--install-only', 'started']),
+        self.assertEqual(calls.read_text().splitlines(), ['--install-only', '--background', '--install-only'])
+        for flags, expected in [([], ['--install-only']), (['--start-tunnel'], ['--install-only', '--background']),
+                                (['--start-tunnel=foreground'], ['--install-only', 'started']),
                                 (['--no-start-tunnel'], ['--install-only'])]:
             calls.write_text('')
             result = subprocess.run(['bash', str(repo / 'setup_container.sh'), '--agents', 'none', *flags],
@@ -237,14 +243,21 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
 
 
     def test_menu_navigation_toggle_and_cancel(self):
-        prefix = f'set -eu; source "{ROOT}/scripts/setup_prompts.sh"; skip_codex=0; skip_claude=0; '
+        prefix = (f'set -eu; source "{ROOT}/scripts/ui.sh"; ui_setup; source "{ROOT}/scripts/setup_prompts.sh"; '
+                  'skip_codex=0; skip_claude=0; ')
         terminal = self.terminal(prefix + 'choose_agents; printf "RESULT:%s:%s" "$skip_codex" "$skip_claude"')
-        terminal.expect('[x] Claude Code')
+        terminal.expect('Anthropic Claude Code')
         terminal.send(b'\x1b[B \x1b[A \x1b[B \r')
         terminal.expect('RESULT:1:0')
         self.assertEqual(terminal.finish(), 0)
+        terminal = self.terminal(prefix + 'choose_agents; printf "RESULT:%s:%s" "$skip_codex" "$skip_claude"')
+        terminal.expect('Anthropic Claude Code')
+        terminal.send(b'a\r')
+        terminal.expect('None (tools only)')
+        terminal.expect('RESULT:1:1')
+        self.assertEqual(terminal.finish(), 0)
         cancel = self.terminal(prefix + 'choose_agents; printf UNEXPECTED')
-        cancel.expect('[x] Claude Code')
+        cancel.expect('Anthropic Claude Code')
         cancel.send(b'q')
         cancel.expect('Setup cancelled.')
         self.assertEqual(cancel.finish(), 130)
@@ -252,16 +265,107 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
 
     def test_interactive_setup_hides_key(self):
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --skip-vscode')
-        terminal.expect('[x] Claude Code')
+        terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
-        terminal.expect('OpenLux API key (input hidden): ')
+        terminal.expect('OpenLux API key (input hidden)')
         terminal.send(b'\r')
         terminal.expect('A key is required')
         terminal.send(KEY.encode() + b'\r')
-        terminal.expect('Selected agents are configured.')
+        terminal.expect(f'Saved for the selected agents ({len(KEY)} characters)')
+        terminal.expect('Setup complete')
         self.assertEqual(terminal.finish(), 0)
         self.assertNotIn(KEY.encode(), terminal.output)
         self.assert_credentials()
+
+    def mock_tunnel_repo(self):
+        repo = self.root / 'repo'
+        shutil.copytree(ROOT, repo, ignore=shutil.ignore_patterns('.git', '__pycache__'))
+        self.executable(repo / 'scripts/start_vscode_tunnel.sh', '''#!/bin/sh
+printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
+''')
+        return repo
+
+    def test_tunnel_name_prompt_validates_input(self):
+        name_file = self.persist / '.webstudio-tunnel/name'
+        repo = self.mock_tunnel_repo()
+        terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none --no-start-tunnel')
+        terminal.expect('VS Code tunnel name')
+        terminal.expect('webstudio-persist')
+        # Invalid characters are rejected, input stops at 20, and a leading hyphen cannot be submitted.
+        terminal.send(b'-')
+        terminal.send(b'\r')
+        terminal.expect('must start with a letter or digit')
+        terminal.send(b'\x7fmy_box.' + b'x' * 30 + b'\r')
+        terminal.expect('VS Code tunnel name')
+        terminal.expect('mybox' + 'x' * 15)
+        terminal.expect('Setup complete')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertEqual(name_file.read_text(), 'mybox' + 'x' * 15 + '\n')
+        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none', '--tunnel-name',
+                                 'a' * 21], env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('up to 20 characters', result.stderr)
+
+    def test_background_tunnel_lifecycle(self):
+        real_tmux = shutil.which('tmux') or '/home/ma-user/work/dataset/demo-user/tools/tmux/bin/tmux'
+        if not os.access(real_tmux, os.X_OK):
+            self.skipTest('tmux is not installed')
+        tmux = self.persist / 'tools/tmux/bin/tmux'
+        tmux.unlink()
+        tmux.symlink_to(real_tmux)
+        self.env.pop('TMUX', None)
+        self.env['TMUX_TMPDIR'] = str(self.root)
+        self.addCleanup(subprocess.run, [real_tmux, 'kill-server'], env=self.env, capture_output=True)
+        vscode = self.root / 'vscode'
+        for runtime_file in ('runtime/bin/patchelf', 'runtime/lib/libstdc++.so.6'):
+            self.executable(vscode / runtime_file, '')
+        self.executable(vscode / 'local/bin/code', '''#!/usr/bin/env bash
+for ((i = 1; i < $#; i++)); do
+  next=$((i + 1))
+  [[ ${!i} == --cli-data-dir ]] && data=${!next}
+  [[ ${!i} == --name ]] && name=${!next}
+done
+case "$1 ${2:-}" in
+  'tunnel user')
+    if [[ $3 == show ]]; then [[ -f $data/token ]]; exit; fi
+    echo 'use code TEST-CODE'; touch "$data/token"; exit 0 ;;
+  'tunnel status')
+    if [[ -f $data/connected ]]; then echo '{"tunnel":{"tunnel":"Connected"}}'; else echo '{"tunnel":null}'; fi
+    exit 0 ;;
+  'tunnel kill') rm -f "$data/connected"; exit 0 ;;
+esac
+if [[ $1 == tunnel ]]; then
+  trap 'rm -f "$data/connected"; exit 0' HUP TERM
+  echo "  Open: https://vscode.dev/tunnel/$name$PWD"
+  touch "$data/connected"
+  while :; do sleep 0.1; done
+fi
+echo 'code 1.0.0'
+''')
+        self.env.update(VSCODE_INSTALL_DIR=str(vscode), VSCODE_LOCAL_DIR=str(vscode / 'local'))
+        (self.persist / '.webstudio-tunnel').mkdir(parents=True)
+        (self.persist / '.webstudio-tunnel/name').write_text('test-name\n')
+        self.local.mkdir()
+        (self.local / '.setup-complete').write_text(f'{ROOT}\n')
+        script = str(ROOT / 'scripts/start_vscode_tunnel.sh')
+        terminal = self.terminal(f'cd "{self.root}" && bash "{script}" --background')
+        terminal.expect('use code TEST-CODE')
+        terminal.expect('VS Code tunnel is running in the background')
+        terminal.expect(f'https://vscode.dev/tunnel/test-name{self.root}')
+        self.assertEqual(terminal.finish(), 0)
+
+        def run(*args):
+            return subprocess.run(['bash', script, *args], env=self.env, text=True, capture_output=True)
+        status = run('--status')
+        self.assertEqual(status.returncode, 0, status.stdout + status.stderr)
+        self.assertIn('tmux attach -t vscode-tunnel', status.stdout)
+        again = run('--background')
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn('already running', again.stdout)
+        self.assertEqual(run('--stop').returncode, 0)
+        self.assertNotEqual(subprocess.run([real_tmux, 'has-session', '-t', '=vscode-tunnel'],
+                                           env=self.env, capture_output=True).returncode, 0)
+        self.assertEqual(run('--status').returncode, 1)
 
     def assert_credentials(self):
         codex = self.state / '.codex/auth.json'
@@ -292,7 +396,7 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents both --skip-vscode')
         terminal.expect('Enter keeps saved credentials')
         terminal.send(b'\r')
-        terminal.expect('Selected agents are configured.')
+        terminal.expect('Setup complete')
         self.assertEqual(terminal.finish(), 0)
         self.assert_credentials()
 

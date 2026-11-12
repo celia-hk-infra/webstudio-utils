@@ -26,15 +26,20 @@ codex resume                                   # 也可直接运行 codex
 
 安装脚本还会通过 Conda 将 tmux 及其依赖安装到持久化存储的 `tools/tmux` 中，并使其在新终端中可用。首次安装需要 Conda，即使使用了 `--skip-vscode` 也一样。后续安装会复用该目录中的 tmux。容器更换后，正在运行的 tmux 会话会结束。
 
-交互式安装结束后，会询问是否立即启动 VS Code 隧道（默认不启动）。选择是后，隧道启动脚本会在前台运行；请保持终端打开，按 Ctrl+C 可停止隧道。使用 `--start-tunnel` 可自动启动，使用 `--no-start-tunnel` 可跳过询问。无人值守运行默认不启动隧道，除非显式指定。`--skip-vscode` 会跳过隧道安装及启动询问，不能与 `--start-tunnel` 同时使用。
+交互式安装会提示输入隧道名称（直接回车保留已保存或默认的名称），然后询问启动方式：后台运行（默认）、在当前终端运行，或暂不启动。后台选项会在名为 `vscode-tunnel` 的 tmux 会话中运行隧道，终端关闭后仍保持运行。使用 `--start-tunnel`（后台）或 `--start-tunnel=foreground` 可跳过询问直接选择，`--no-start-tunnel` 可跳过启动。无人值守运行默认不启动隧道，除非显式指定。`--skip-vscode` 会跳过隧道安装及启动询问，不能与 `--start-tunnel` 同时使用。
 
-安装脚本会保存隧道名称，后续容器直接运行 `./setup_container.sh` 即可，无需再传入 `--tunnel-name`。脚本可以安全地重复运行。要在终端启动 VS Code 隧道，请运行：
+安装脚本会保存隧道名称，后续容器直接运行 `./setup_container.sh` 即可，无需再传入 `--tunnel-name`。脚本可以安全地重复运行。
+
+安装后可直接管理隧道：
 
 ```bash
-./scripts/start_vscode_tunnel.sh
+./scripts/start_vscode_tunnel.sh --background   # 后台启动
+./scripts/start_vscode_tunnel.sh --status       # 查看是否已连接
+./scripts/start_vscode_tunnel.sh --stop         # 停止后台会话
+./scripts/start_vscode_tunnel.sh                # 在当前终端运行（Ctrl+C 停止）
 ```
 
-使用 VS Code 期间，请保持该进程运行。隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在持久化存储中保留隧道的 CLI 身份与登录数据，并复用已保存的名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
+隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在持久化存储中保留隧道的 CLI 身份与登录数据，并复用已保存的名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
 
 隧道名称最多为 20 个字符，只能包含字母、数字或连字符。可运行 `./setup_container.sh --tunnel-name SHORT-NAME` 修改已保存的名称。
 

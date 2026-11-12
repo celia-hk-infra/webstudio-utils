@@ -1,50 +1,41 @@
 #!/usr/bin/env bash
-# Sourced by setup_container.sh; uses its skip_codex/skip_claude variables.
+# Sourced by setup_container.sh after scripts/ui.sh and ui_setup; uses its
+# skip_codex, skip_claude, tunnel_name, and start_tunnel variables.
+# prompt_yes_no is also used by shell/init.sh and needs nothing else.
 choose_agents() {
-  local selected=0 key suffix row mark pointer
-  printf '\nChoose agents\nUp/Down: move   Space: toggle   Enter: continue   q: cancel\n'
-  while :; do
-    for row in 0 1; do
-      mark=x; pointer=' '
-      if (( row == 0 && skip_codex || row == 1 && skip_claude )); then mark=' '; fi
-      if (( row == selected )); then pointer='>'; fi
-      if (( row == 0 )); then
-        printf '\r\033[2K%s [%s] Codex\n' "$pointer" "$mark"
-      else
-        printf '\r\033[2K%s [%s] Claude Code\n' "$pointer" "$mark"
-      fi
-    done
-    IFS= read -rsn1 key || return 130
-    case $key in
-      $'\033')
-        suffix=
-        IFS= read -rsn2 -t 0.2 suffix || true
-        case $suffix in '[A'|'OA') selected=$((1 - selected)) ;; '[B'|'OB') selected=$((1 - selected)) ;; esac
-        ;;
-      ' ')
-        if (( selected == 0 )); then skip_codex=$((1 - skip_codex)); else skip_claude=$((1 - skip_claude)); fi
-        ;;
-      '') return 0 ;;
-      q|Q) printf 'Setup cancelled.\n'; return 130 ;;
-    esac
-    printf '\033[2A'
-  done
+  UI_MENU=($((1 - skip_codex)) $((1 - skip_claude)))
+  ui_menu multi 'Which coding agents should be installed?' \
+    'Codex|OpenAI Codex CLI' 'Claude Code|Anthropic Claude Code' || return
+  skip_codex=$((1 - UI_MENU[0]))
+  skip_claude=$((1 - UI_MENU[1]))
+  local chosen=()
+  (( skip_codex )) || chosen+=(Codex)
+  (( skip_claude )) || chosen+=('Claude Code')
+  if (( ${#chosen[@]} == 2 )); then
+    ui_answer 'Coding agents' 'Codex, Claude Code'
+  else
+    ui_answer 'Coding agents' "${chosen[0]:-None (tools only)}"
+  fi
 }
 
 prompt_openlux_key() {
-  local saved_auth=$1
+  local saved_auth=$1 title='OpenLux API key' valid='.'
   if [[ -n ${OPENLUX_API_KEY:-} ]]; then
     setup_api_key=$OPENLUX_API_KEY
   elif [[ -t 0 ]]; then
-    printf '\nOpenLux API key (input hidden'
-    if [[ $saved_auth == true ]]; then printf '; Enter keeps saved credentials'; fi
-    printf '): '
-    while :; do
-      IFS= read -rs setup_api_key || { printf '\nSetup cancelled.\n' >&2; return 130; }
-      printf '\n'
-      if [[ -n $setup_api_key || $saved_auth == true ]]; then break; fi
-      printf 'A key is required for the selected agents. OpenLux API key: '
-    done
+    if [[ $saved_auth == true ]]; then
+      title+=" ${UI_DIM}(input hidden; Enter keeps saved credentials)${UI_RESET}"
+      valid=''
+    else
+      title+=" ${UI_DIM}(input hidden)${UI_RESET}"
+    fi
+    ui_input setup_api_key "$title" '' '' 0 1 "$valid" \
+      'A key is required for the selected agents' || { ui_error 'Setup cancelled.'; return 130; }
+    if [[ -n $setup_api_key ]]; then
+      ui_answer 'OpenLux API key' "Saved for the selected agents (${#setup_api_key} characters)"
+    else
+      ui_answer 'OpenLux API key' 'Keeping saved credentials'
+    fi
   elif [[ $saved_auth != true ]]; then
     printf 'Set OPENLUX_API_KEY for unattended setup; selected agents have no saved API key.\n' >&2
     return 2
@@ -53,6 +44,30 @@ prompt_openlux_key() {
     printf 'The API key must not contain whitespace. Rerun setup with the key only.\n' >&2
     return 2
   fi
+}
+
+# VS Code limits tunnel names to 20 characters.
+prompt_tunnel_name() {
+  local default=$1
+  ui_input tunnel_name "VS Code tunnel name ${UI_DIM}(Enter keeps ${default}; letters, digits, hyphens)${UI_RESET}" \
+    "$default" '[A-Za-z0-9-]' 20 0 '^[A-Za-z0-9][A-Za-z0-9-]{0,19}$' 'must start with a letter or digit' ||
+    { ui_error 'Setup cancelled.'; return 130; }
+  ui_answer 'VS Code tunnel name' "$tunnel_name"
+}
+
+choose_tunnel_start() {
+  local choices=(background foreground no)
+  UI_MENU=(0)
+  ui_menu single 'Start the VS Code tunnel when setup finishes?' \
+    'In the background|keeps running after you close this terminal (recommended)' \
+    'In this terminal|shows tunnel logs here; Ctrl+C stops it' \
+    'Not now|start it later with scripts/start_vscode_tunnel.sh' || return
+  start_tunnel=${choices[UI_MENU[0]]}
+  case $start_tunnel in
+    background) ui_answer 'Start VS Code tunnel' 'In the background (tmux session vscode-tunnel)' ;;
+    foreground) ui_answer 'Start VS Code tunnel' 'In this terminal' ;;
+    no) ui_answer 'Start VS Code tunnel' 'Not now' ;;
+  esac
 }
 
 # Default to no on Enter or EOF; retry unrecognized answers.

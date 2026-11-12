@@ -33,28 +33,34 @@ installation, including when using `--skip-vscode`. Existing tmux installations
 in that directory are reused. Running tmux sessions end when the container is
 replaced.
 
-After setup, interactive runs ask whether to start the VS Code tunnel (default:
-No). Choosing Yes runs the tunnel launcher in the foreground; keep the terminal
-open, and press Ctrl+C to stop it. Use `--start-tunnel` to start automatically or
-`--no-start-tunnel` to skip the question. Unattended runs do not start the tunnel
-unless explicitly requested. `--skip-vscode` skips both tunnel installation and
-the start question, and cannot be combined with `--start-tunnel`.
+Interactive setup prompts for a tunnel name (Enter keeps the saved or default
+name) and then asks how to start the tunnel: in the background (default),
+in the terminal, or not at all. The background option runs the tunnel in a
+detached tmux session named `vscode-tunnel`; it keeps running after the
+terminal closes. Use `--start-tunnel` (background) or
+`--start-tunnel=foreground` to choose without the prompt, or
+`--no-start-tunnel` to skip it. Unattended runs do not start the tunnel
+unless explicitly requested. `--skip-vscode` skips tunnel installation and the
+start question, and cannot be combined with `--start-tunnel`.
 
 The setup script saves the tunnel name, so later containers can run
-`./setup_container.sh` without `--tunnel-name`. It is safe to rerun. To start
-the VS Code tunnel in a terminal, run:
+`./setup_container.sh` without `--tunnel-name`. It is safe to rerun.
+
+After setup, manage the tunnel directly:
 
 ```bash
-./scripts/start_vscode_tunnel.sh
+./scripts/start_vscode_tunnel.sh --background   # start in the background
+./scripts/start_vscode_tunnel.sh --status       # show whether it is connected
+./scripts/start_vscode_tunnel.sh --stop         # stop the background session
+./scripts/start_vscode_tunnel.sh                # run in this terminal (Ctrl+C stops)
 ```
 
-Keep that process running while using VS Code. The tunnel launcher also sources
-`shell/init.sh`, so it passes the agent environment to VS Code terminals. It
-preserves the tunnel's CLI identity and sign-in data on persistent storage, and
-reuses the saved name. The server installation runs on local `/tmp` storage and
-is rebuilt when a container is replaced. A sign-in may still be needed if the
-stored credential expires or is revoked. Do not run the same tunnel identity
-from two containers at once.
+The tunnel launcher also sources `shell/init.sh`, so it passes the agent
+environment to VS Code terminals. It preserves the tunnel's CLI identity and
+sign-in data on persistent storage, and reuses the saved name. The server
+installation runs on local `/tmp` storage and is rebuilt when a container is
+replaced. A sign-in may still be needed if the stored credential expires or is
+revoked. Do not run the same tunnel identity from two containers at once.
 
 Tunnel names can be at most 20 letters, digits, or hyphens. Use
 `./setup_container.sh --tunnel-name SHORT-NAME` to change a saved name.

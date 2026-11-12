@@ -20,7 +20,7 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel | --no-start-tunnel]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 Then enter your OpenLux API key once for the selected agents.
@@ -30,10 +30,13 @@ GitHub login is required unless --skip-gh-auth is set. Interactive setup starts
 browser login and saves the token in private persistent storage. Unattended
 setup needs a saved GitHub login, GH_TOKEN, or GITHUB_TOKEN.
 Install tmux in persistent storage using Conda, prepare agent tools, and install
-the VS Code tunnel CLI. Interactive setup offers to start the tunnel afterward.
-Use --start-tunnel or --no-start-tunnel to choose without a prompt.
-Start the tunnel separately with:
-  ./scripts/start_vscode_tunnel.sh
+the VS Code tunnel CLI. Interactive setup asks for a tunnel name (Enter keeps
+the saved or default name) and whether to start the tunnel afterward: in a
+background tmux session (default), in the terminal, or not at all.
+Use --start-tunnel (background), --start-tunnel=foreground, or
+--no-start-tunnel to choose without a prompt. Start the tunnel separately with:
+  ./scripts/start_vscode_tunnel.sh --background
+Command output is kept in $WEBSTUDIO_LOCAL_DIR/setup.log and shown on failure.
 
 Set WEBSTUDIO_CODEX_VERSION to pin a different Codex CLI version.
 Set WEBSTUDIO_CLAUDE_VERSION to pin Claude Code (default: 2.1.322).
@@ -57,17 +60,25 @@ while (($#)); do
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
     --skip-gh-auth) skip_gh_auth=1; shift ;;
-    --start-tunnel) start_tunnel=yes; shift ;;
+    --start-tunnel|--start-tunnel=background) start_tunnel=background; shift ;;
+    --start-tunnel=foreground) start_tunnel=foreground; shift ;;
     --no-start-tunnel) start_tunnel=no; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-if (( skip_vscode )) && [[ $start_tunnel == yes ]]; then
+if (( skip_vscode )) && [[ $start_tunnel == @(background|foreground) ]]; then
   echo '--start-tunnel cannot be combined with --skip-vscode.' >&2
   exit 2
 fi
+
+source "$repo_dir/scripts/ui.sh"
+ui_setup
+trap ui_cleanup EXIT
+trap 'exit 130' INT TERM
+source "$repo_dir/scripts/setup_prompts.sh"
+if [[ -t 0 ]]; then ui_intro 'WebStudio container setup' 'Safe to rerun; answers are saved'; fi
 
 if [[ -n $agents ]]; then
   case $agents in
@@ -78,7 +89,6 @@ if [[ -n $agents ]]; then
     *) echo '--agents must be codex, claude, both, or none.' >&2; exit 2 ;;
   esac
 elif (( ! selection_explicit )) && [[ -t 0 ]]; then
-  source "$repo_dir/scripts/setup_prompts.sh"
   choose_agents
 fi
 [[ $claude_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -102,24 +112,52 @@ export -n setup_api_key
 if (( ! skip_codex || ! skip_claude )); then
   command -v node >/dev/null || { echo 'node is required to configure agents.' >&2; exit 1; }
   saved_auth=$(node "$repo_dir/scripts/has_saved_agent_auth.cjs" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$skip_codex" "$skip_claude")
-  source "$repo_dir/scripts/setup_prompts.sh"
   prompt_openlux_key "$saved_auth"
 fi
 # Keep the key in a non-exported shell variable until it is piped to each CLI.
 unset OPENLUX_API_KEY
+
+tunnel_dir="$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel"
+mkdir -p -m 700 -- "$tunnel_dir/cli-data"
+chmod 700 -- "$tunnel_dir" "$tunnel_dir/cli-data"
+if [[ -z $tunnel_name ]]; then
+  if [[ -s $tunnel_dir/name ]]; then
+    IFS= read -r tunnel_name < "$tunnel_dir/name"
+  else
+    tunnel_name=$(basename -- "$WEBSTUDIO_PERSIST_ROOT" | tr -c 'A-Za-z0-9-\n' - | cut -c 1-10)
+    tunnel_name="webstudio-$tunnel_name"
+  fi
+  if (( ! skip_vscode )) && [[ -t 0 ]]; then
+    [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || tunnel_name=webstudio
+    prompt_tunnel_name "$tunnel_name"
+  fi
+fi
+[[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || {
+  echo 'Tunnel name must contain only letters, digits, and hyphens (up to 20 characters).' >&2
+  exit 2
+}
+printf '%s\n' "$tunnel_name" > "$tunnel_dir/name"
+chmod 600 -- "$tunnel_dir/name"
+if (( ! skip_vscode )) && [[ $start_tunnel == ask && -t 0 ]]; then
+  choose_tunnel_start
+fi
+
 mkdir -p -- "$WEBSTUDIO_LOCAL_DIR/bin"
 chmod 700 -- "$WEBSTUDIO_LOCAL_DIR"
+UI_LOG="$WEBSTUDIO_LOCAL_DIR/setup.log"
+: > "$UI_LOG"
+chmod 600 -- "$UI_LOG"
+if [[ -t 0 ]]; then ui_step 'Installing'; fi
 
 # Install the official GitHub CLI archive once on the persistent mount.
 gh_root="$WEBSTUDIO_PERSIST_ROOT/tools/gh"
 gh_release="$gh_root/$gh_version"
 mkdir -p -- "$gh_root"
-if [[ ! -x $gh_release/bin/gh ]]; then
+install_gh() {
   command -v curl >/dev/null || { echo 'curl is required to install gh.' >&2; exit 1; }
   command -v sha256sum >/dev/null || { echo 'sha256sum is required to verify gh.' >&2; exit 1; }
   gh_stage=$(mktemp -d "$gh_root/.install.XXXXXX")
   gh_base="https://github.com/cli/cli/releases/download/v$gh_version/gh_${gh_version}"
-  echo "Installing gh $gh_version to persistent storage..."
   curl -fL --retry 3 -o "$gh_stage/gh.tar.gz" "${gh_base}_linux_amd64.tar.gz"
   curl -fL --retry 3 -o "$gh_stage/checksums.txt" "${gh_base}_checksums.txt"
   (cd "$gh_stage" && grep " gh_${gh_version}_linux_amd64.tar.gz\$" checksums.txt | sed "s/ gh_${gh_version}_linux_amd64.tar.gz\$/ gh.tar.gz/" | sha256sum -c -)
@@ -131,26 +169,32 @@ if [[ ! -x $gh_release/bin/gh ]]; then
   mv -- "$gh_stage/gh_${gh_version}_linux_amd64" "$gh_release"
   rm -f -- "$gh_stage/gh.tar.gz" "$gh_stage/checksums.txt"
   rmdir -- "$gh_stage"
+}
+if [[ ! -x $gh_release/bin/gh ]]; then
+  ui_run "Installing GitHub CLI $gh_version" install_gh
 fi
 ln -sfnT -- "$gh_version" "$gh_root/current"
 # The first shell init ran before gh existed; expose the new install now.
 export PATH="$gh_root/current/bin:$PATH"
-echo "GitHub CLI ready: $gh_root/current/bin/gh"
+ui_ok "GitHub CLI $gh_version" "$gh_root/current/bin/gh"
 if (( ! skip_gh_auth )); then
   if ! gh auth status --hostname github.com >/dev/null 2>&1; then
     if [[ ! -t 0 ]]; then
       echo 'GitHub login required. Rerun setup in a terminal, supply GH_TOKEN or GITHUB_TOKEN, or use --skip-gh-auth.' >&2
       exit 2
     fi
-    echo 'Sign in to GitHub. The token will be stored as a file in the private persistent gh directory.'
+    ui_bar
+    ui_step 'Sign in to GitHub.'
+    ui_note 'The token is stored in the private persistent gh directory.'
     (umask 077; gh auth login --hostname github.com --git-protocol https --web --insecure-storage)
+    ui_bar
   fi
   # Restore Git's credential helper even when the container home is new.
   gh auth setup-git --hostname github.com
   if [[ -f $GH_CONFIG_DIR/hosts.yml ]]; then
     chmod 600 -- "$GH_CONFIG_DIR/hosts.yml"
   fi
-  echo 'GitHub authentication ready; Git uses gh for HTTPS credentials.'
+  ui_ok 'GitHub authentication ready' 'Git uses gh for HTTPS credentials'
 fi
 
 # Keep tmux and its libraries together on the persistent mount.
@@ -169,11 +213,10 @@ if [[ ! -x $tmux_prefix/bin/tmux ]]; then
   fi
   conda_action=create
   [[ ! -d $tmux_prefix/conda-meta ]] || conda_action=install
-  echo 'Installing tmux to persistent storage...'
-  "$conda_bin" "$conda_action" --yes --prefix "$tmux_prefix" --solver classic \
+  ui_run 'Installing tmux with Conda' "$conda_bin" "$conda_action" --yes --prefix "$tmux_prefix" --solver classic \
     --override-channels --channel conda-forge --repodata-fn current_repodata.json tmux
 fi
-"$tmux_prefix/bin/tmux" -V
+ui_ok "$("$tmux_prefix/bin/tmux" -V)" "$tmux_prefix/bin/tmux"
 export PATH="$tmux_prefix/bin:$PATH"
 
 # The daemon requires its control directory to be private. A migrated Codex
@@ -200,23 +243,6 @@ if [[ -L $daemon_package_dir/current ]]; then
   fi
 fi
 
-tunnel_dir="$WEBSTUDIO_PERSIST_ROOT/.webstudio-tunnel"
-mkdir -p -m 700 -- "$tunnel_dir/cli-data"
-chmod 700 -- "$tunnel_dir" "$tunnel_dir/cli-data"
-if [[ -z $tunnel_name ]]; then
-  if [[ -s $tunnel_dir/name ]]; then
-    IFS= read -r tunnel_name < "$tunnel_dir/name"
-  else
-    tunnel_name="webstudio-$(basename -- "$WEBSTUDIO_PERSIST_ROOT" | cut -c 1-10)"
-  fi
-fi
-[[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || {
-  echo 'Tunnel name must contain only letters, digits, and hyphens (up to 20 characters).' >&2
-  exit 2
-}
-printf '%s\n' "$tunnel_name" > "$tunnel_dir/name"
-chmod 600 -- "$tunnel_dir/name"
-
 install_agent() {
   local agent_name=$1 agent_package=$2 agent_version=$3 agent_label=$4
   local agent_root agent_cache install_stage local_agent_root local_agent local_stage
@@ -227,7 +253,6 @@ install_agent() {
   mkdir -p -- "$agent_root" "$WEBSTUDIO_PERSIST_ROOT/cache/npm"
   if [[ ! -x $agent_cache/node_modules/.bin/$agent_name ]]; then
     install_stage=$(mktemp -d "$agent_root/.install.XXXXXX")
-    echo "Installing ${agent_package}@$agent_version to persistent cache..."
     if ! npm_config_cache="$WEBSTUDIO_PERSIST_ROOT/cache/npm" npm install --registry "$npm_registry" \
       --prefix "$install_stage" --no-save --no-audit --no-fund \
       "${agent_package}@$agent_version"; then
@@ -251,7 +276,6 @@ install_agent() {
   mkdir -p -- "$local_agent_root"
   if [[ ! -x $local_agent/node_modules/.bin/$agent_name ]]; then
     local_stage=$(mktemp -d "$local_agent_root/.stage.XXXXXX")
-    echo "Copying ${agent_label} CLI from persistent storage to local disk..."
     cp -a -- "$agent_cache/node_modules" "$local_stage/"
     if [[ ! -x $local_stage/node_modules/.bin/$agent_name ]]; then
       rm -rf -- "$local_stage"
@@ -267,8 +291,12 @@ install_agent() {
   ln -sfnT -- "$local_agent/node_modules/.bin/$agent_name" "$WEBSTUDIO_LOCAL_DIR/bin/$agent_name"
 }
 
+codex_login() {
+  printf '%s' "$setup_api_key" | "$WEBSTUDIO_LOCAL_DIR/bin/codex" login --with-api-key
+}
+
 if (( ! skip_codex )); then
-  install_agent codex "@openai/codex" "$codex_version" Codex
+  ui_run "Installing Codex $codex_version" install_agent codex "@openai/codex" "$codex_version" Codex
   # Keep this setting at TOML's top level, before any table headers.
   codex_config="$CODEX_HOME/config.toml"
   config_stage=$(mktemp "${codex_config%/*}/.config.XXXXXX")
@@ -292,41 +320,50 @@ if (( ! skip_codex )); then
   chmod 600 -- "$codex_config"
   rm -f -- "$config_stage"
   if [[ -n $setup_api_key ]]; then
-    printf '%s' "$setup_api_key" | "$WEBSTUDIO_LOCAL_DIR/bin/codex" login --with-api-key
+    ui_run 'Saving the OpenLux key for Codex' codex_login
   fi
   chmod 600 -- "$CODEX_HOME/auth.json"
-  echo "Codex ready: $WEBSTUDIO_LOCAL_DIR/bin/codex"
+  ui_ok "Codex $codex_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 
 if (( ! skip_claude )); then
-  install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
+  ui_run "Installing Claude Code $claude_version" install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
   printf '%s' "$setup_api_key" | node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json" --key-stdin
-  echo "Claude Code ready: $WEBSTUDIO_LOCAL_DIR/bin/claude"
+  ui_ok "Claude Code $claude_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/claude"
 fi
 unset setup_api_key
 
 if (( ! skip_vscode )); then
-  "$repo_dir/scripts/start_vscode_tunnel.sh" --install-only
+  ui_run 'Installing the VS Code tunnel CLI' "$repo_dir/scripts/start_vscode_tunnel.sh" --install-only
+  ui_ok 'VS Code tunnel CLI ready' "tunnel name: $tunnel_name"
 fi
 
-printf 'Persistent state: %s\nTunnel name: %s\n' "$WEBSTUDIO_PERSIST_ROOT" "$tunnel_name"
-printf 'For this shell: source %q\n' "$repo_dir/shell/init.sh"
-printf 'To start VS Code: %q\n' "$repo_dir/scripts/start_vscode_tunnel.sh"
-echo 'Selected agents are configured. Load shell/init.sh in this terminal, then run codex or claude.'
+installed=()
+(( skip_codex )) || installed+=(codex)
+(( skip_claude )) || installed+=(claude)
+printf -v init_command 'source %q' "$repo_dir/shell/init.sh"
+ui_bar
+summary=("Agents     ${installed[*]:-none}")
+(( skip_vscode )) || summary+=("Tunnel     $tunnel_name")
+summary+=("Storage    $WEBSTUDIO_PERSIST_ROOT" "Setup log  $UI_LOG" ''
+  'New terminals load the environment automatically.' 'In this terminal, run first:' "  $init_command")
+if (( ! skip_vscode )) && [[ $start_tunnel != @(background|foreground) ]]; then
+  summary+=('' 'Start VS Code later:' "  $repo_dir/scripts/start_vscode_tunnel.sh --background")
+fi
+ui_box 'Setup complete' "${summary[@]}"
 
 # Only mark a fully completed setup; local storage is reset on replacement.
 printf '%s\n' "$repo_dir" > "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
 chmod 600 -- "$WEBSTUDIO_LOCAL_DIR/.setup-complete"
 unset WEBSTUDIO_SETUP_RUNNING
 if (( ! skip_vscode )); then
-  if [[ $start_tunnel == ask && -t 0 ]]; then
-    source "$repo_dir/scripts/setup_prompts.sh"
-    if prompt_yes_no 'Start the VS Code tunnel now? [y/N] '; then
-      start_tunnel=yes
-    fi
-  fi
-  if [[ $start_tunnel == yes ]]; then
-    echo 'Keep this terminal open while using the tunnel. Ctrl+C stops it.'
-    exec "$repo_dir/scripts/start_vscode_tunnel.sh"
-  fi
+  case $start_tunnel in
+    background)
+      "$repo_dir/scripts/start_vscode_tunnel.sh" --background
+      ;;
+    foreground)
+      ui_note 'Keep this terminal open while using the tunnel. Ctrl+C stops it.'
+      exec "$repo_dir/scripts/start_vscode_tunnel.sh"
+      ;;
+  esac
 fi
