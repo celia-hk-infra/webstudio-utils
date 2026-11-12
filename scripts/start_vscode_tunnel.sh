@@ -4,7 +4,7 @@ set -euo pipefail
 
 if [[ "${1:-}" == --help ]]; then
   cat <<'EOF'
-Usage: bash start_vscode_tunnel.sh [--install-only | --background | --status | --stop | tunnel options...]
+Usage: bash start_vscode_tunnel.sh [--install-only | --prefetch | --background | --status | --stop | tunnel options...]
 First run installs a small Conda runtime and downloads the VS Code CLI.
 Default: run the tunnel in this terminal using the name saved by
 setup_tools.sh; on a fresh container you are prompted for a name (Enter accepts a unique default).
@@ -15,14 +15,18 @@ Ctrl+C stops it.
               container restart. View it with: tmux attach -t vscode-tunnel
 --status      show whether a tunnel is connected.
 --stop        stop the background session and any running tunnel.
+--prefetch    cache the latest stable server using verified parallel downloads.
 Example: bash start_vscode_tunnel.sh --background
 Overrides: WEBSTUDIO_TUNNEL_DIR (default /home/ma-user/work/.webstudio-tunnel),
            WEBSTUDIO_TUNNEL_NAME, VSCODE_CLI_DATA_DIR,
            CONDA_EXE, VSCODE_INSTALL_DIR, VSCODE_LOCAL_DIR,
+           VSCODE_PERSISTENT_DATA_DIR, VSCODE_DOWNLOAD_CACHE,
+           VSCODE_DOWNLOAD_WORKERS (default 32, maximum 32),
            VSCODE_GLIBC_LINKER (default /lib64/ld-linux-x86-64.so.2),
            VSCODE_CONDA_SOLVER (default classic),
            VSCODE_TUNNEL_PROVIDER (sign-in for --background: github or microsoft).
-Keep VSCODE_LOCAL_DIR on local disk; the server is rebuilt after a restart.
+Keep VSCODE_LOCAL_DIR on local disk. Editor data/extensions and compressed
+server archives persist; deleted local servers are restored from the cache.
 EOF
   exit 0
 fi
@@ -43,6 +47,9 @@ LOCAL_DIR="${VSCODE_LOCAL_DIR:-$WEBSTUDIO_LOCAL_DIR/vscode}"
 CLI="$LOCAL_DIR/bin/code"
 CLI_ARCHIVE="$INSTALL_DIR/cli-alpine-x64.tar.gz"
 CLI_DATA_DIR="${VSCODE_CLI_DATA_DIR:-$WEBSTUDIO_TUNNEL_DIR/cli-data}"
+SERVER_DATA_DIR="${VSCODE_PERSISTENT_DATA_DIR:-$WEBSTUDIO_AGENT_STATE_DIR/vscode-server}"
+DOWNLOAD_CACHE="${VSCODE_DOWNLOAD_CACHE:-$INSTALL_DIR/server-archives}"
+download_helper="$(dirname -- "$script_path")/vscode_downloads.py"
 
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || {
   echo 'This script requires x86_64 Linux.' >&2; exit 1;
@@ -55,7 +62,7 @@ if (( glibc_major < 2 || (glibc_major == 2 && glibc_minor < 28) )); then
 fi
 LINKER="${VSCODE_GLIBC_LINKER:-/lib64/ld-linux-x86-64.so.2}"
 [[ -x "$LINKER" ]] || { echo "Missing dynamic linker: $LINKER" >&2; exit 1; }
-for required_tool in tar curl mktemp; do
+for required_tool in tar curl mktemp python3; do
   command -v "$required_tool" >/dev/null 2>&1 || {
     echo "Required command not found: $required_tool" >&2; exit 1;
   }
@@ -89,6 +96,12 @@ fi
 
 mkdir -p "$LOCAL_DIR"
 chmod 700 "$LOCAL_DIR"
+# --server-data-dir controls editor data, but the CLI installs server binaries
+# under its own data directory. Keep those thousands of files on local disk too.
+mkdir -p -m 700 -- "$CLI_DATA_DIR" "$LOCAL_DIR/servers"
+if [[ ! -e "$CLI_DATA_DIR/servers" && ! -L "$CLI_DATA_DIR/servers" ]]; then
+  ln -s -- "$LOCAL_DIR/servers" "$CLI_DATA_DIR/servers"
+fi
 if [[ ! -x "$CLI" ]]; then
   # Relocated Conda curl installations can have invalid built-in CA paths.
   CURL_BIN="$(command -v curl)"
@@ -227,7 +240,8 @@ case $mode in
       chmod 600 -- "$TUNNEL_LOG"
       tmux_env=()
       for name in WEBSTUDIO_PERSIST_ROOT WEBSTUDIO_LOCAL_DIR VSCODE_INSTALL_DIR VSCODE_LOCAL_DIR \
-        VSCODE_GLIBC_LINKER VSCODE_CONDA_SOLVER CONDA_EXE VSCODE_CLI_DATA_DIR WEBSTUDIO_TUNNEL_NAME WEBSTUDIO_TUNNEL_DIR; do
+        VSCODE_GLIBC_LINKER VSCODE_CONDA_SOLVER CONDA_EXE VSCODE_CLI_DATA_DIR WEBSTUDIO_TUNNEL_NAME WEBSTUDIO_TUNNEL_DIR \
+        WEBSTUDIO_AGENT_STATE_DIR VSCODE_PERSISTENT_DATA_DIR VSCODE_DOWNLOAD_CACHE VSCODE_DOWNLOAD_WORKERS; do
         if [[ -n ${!name:-} ]]; then tmux_env+=(-e "$name=${!name}"); fi
       done
       printf -v pipe_command 'cat >> %q' "$TUNNEL_LOG"
@@ -250,13 +264,15 @@ export VSCODE_SERVER_CUSTOM_GLIBC_LINKER="$LINKER"
 export VSCODE_SERVER_CUSTOM_GLIBC_PATH="$RUNTIME/lib:/lib64:/usr/lib64"
 export VSCODE_SERVER_PATCHELF_PATH="$RUNTIME/bin/patchelf"
 
-if [[ "${1:-}" == --install-only ]]; then
+download_args=(--cache "$DOWNLOAD_CACHE" --local "$LOCAL_DIR/downloads" --workers "${VSCODE_DOWNLOAD_WORKERS:-32}")
+if [[ "${1:-}" == --install-only || "${1:-}" == --prefetch ]]; then
   "$CLI" --version
+  python3 "$download_helper" "${download_args[@]}" --prefetch
   echo "Installed. Start with: bash $0"
   exit 0
 fi
 
-# Keep identity and sign-in data container-local, as well as server files.
+# Identity stays separate from portable editor data and the archive cache.
 mkdir -p -m 700 -- "$CLI_DATA_DIR"
 chmod 700 -- "$CLI_DATA_DIR"
 tunnel_args=("$@")
@@ -277,5 +293,13 @@ if (( ! has_name )); then
   tunnel_args=(--name "$tunnel_name" "${tunnel_args[@]}")
 fi
 echo 'Starting tunnel. Follow the license and sign-in prompts; Ctrl+C stops it.'
-exec "$CLI" tunnel --cli-data-dir "$CLI_DATA_DIR" \
-  --server-data-dir "$LOCAL_DIR/server-data" "${tunnel_args[@]}"
+# Do not migrate live editor databases. Normal startup after --stop is safe;
+# invoking foreground a second time must leave the running editor untouched.
+if tunnel_connected; then
+  echo 'VS Code tunnel is already connected. Stop it before starting another foreground instance.' >&2
+  exit 1
+fi
+exec python3 "$download_helper" "${download_args[@]}" \
+  --migrate-data "$LOCAL_DIR/server-data" "$SERVER_DATA_DIR" -- \
+  "$CLI" tunnel --cli-data-dir "$CLI_DATA_DIR" \
+  --server-data-dir "$SERVER_DATA_DIR" --extensions-dir "$SERVER_DATA_DIR/extensions" "${tunnel_args[@]}"

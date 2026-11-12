@@ -45,7 +45,17 @@ codex resume                                   # 也可直接运行 codex
 ./scripts/start_vscode_tunnel.sh                # 在当前终端运行（Ctrl+C 停止）
 ```
 
-隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在各容器自己的工作目录中保存隧道 CLI 身份、登录数据和名称。服务端安装在本地 `/tmp` 存储中，容器更换后会重新构建。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
+隧道启动脚本也会加载 `shell/init.sh`，将智能体环境传递给 VS Code 终端。它会在各容器自己的工作目录中保存隧道 CLI 身份、登录数据和名称。服务端可执行文件安装在本地 `/tmp` 存储中，容器更换后从持久化压缩包缓存重新解压。远程设置、扩展和编辑器状态保存在 `$WEBSTUDIO_AGENT_STATE_DIR/vscode-server`，不会随 `/tmp` 清理而丢失。运行中的终端、命令和调试进程仍会在容器重启时结束。如果保存的凭据过期或被撤销，仍可能需要重新登录。请勿在两个容器中同时使用同一隧道身份。
+
+首次安装（`--install-only`）会预下载最新稳定版服务端。每次连接时，启动器通过 VS Code 的 `VSCODE_CLI_UPDATE_URL` 接口，把客户端实际请求的版本交给本机回环下载服务处理：默认使用 32 个连接分段下载，核对 HTTP 字节范围并校验微软提供的 SHA-256，最后原子写入持久化缓存。旧版本、新版本和 agent supervisor 的下载都使用这条路径。缓存命中时无需再次访问下载站点；如果服务器不支持分段请求，则退回单连接并仍执行校验。此机制不能保证外部网络速度，但避免了此前的单连接瓶颈和每次重启重复下载。
+
+```bash
+./scripts/start_vscode_tunnel.sh --prefetch  # 提前缓存当前最新稳定版
+```
+
+`VSCODE_DOWNLOAD_WORKERS` 可设置为 1–32（默认 32）；`VSCODE_DOWNLOAD_CACHE` 默认是 `$VSCODE_INSTALL_DIR/server-archives`。缓存不自动清理，旧版本压缩包会占用持久化空间。`VSCODE_PERSISTENT_DATA_DIR` 可覆盖编辑器数据目录；同时运行多个容器时应为每个容器配置独立的数据目录，压缩包缓存可以共享。加速下载需要 Python 3 和 curl，无需额外 Python 包。
+
+旧的 `/tmp/.../server-data` 在下次停止并重新启动隧道时复制到持久化目录，保留原目录的备份，并把旧路径改为符号链接。如果源目录和目标目录都已有数据，启动器会停止并提示合并，避免覆盖已有设置。迁移前请停止旧编辑器进程；`--stop` 停止隧道后，独立的编辑器或 agent 进程可能仍需关闭。
 
 隧道名称最多为 20 个字符，只能包含字母、数字或连字符。可运行 `./setup_tools.sh --tunnel-name SHORT-NAME` 修改已保存的名称。
 
@@ -57,6 +67,8 @@ codex resume                                   # 也可直接运行 codex
 | `user-sfs/.webstudio-agent-home/gh` | GitHub CLI 登录数据 |
 | `/home/ma-user/work/.webstudio-tunnel` | 当前容器的隧道名称、CLI 身份与登录数据 |
 | `user-sfs/tools` 和 `cache` | 固定版本的 CLI 软件包、VS Code 运行环境及下载缓存 |
+| `user-sfs/.webstudio-agent-home/vscode-server` | VS Code 远程设置、扩展和编辑器状态 |
+| `user-sfs/tools/vscode/server-archives` | 按提交版本保存、经 SHA-256 校验的服务端压缩包 |
 | `user-sfs/tools/gh` | 供新终端和新容器共用的 GitHub CLI 可执行文件 |
 | `user-sfs/tools/tmux` | tmux 及其 Conda 依赖 |
 | `/tmp/webstudio-$UID` | 安装日志、VS Code CLI 及 VS Code 服务端 |
