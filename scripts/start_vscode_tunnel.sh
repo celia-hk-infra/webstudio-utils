@@ -7,7 +7,7 @@ if [[ "${1:-}" == --help ]]; then
 Usage: bash start_vscode_tunnel.sh [--install-only | --background | --status | --stop | tunnel options...]
 First run installs a small Conda runtime and downloads the VS Code CLI.
 Default: run the tunnel in this terminal using the name saved by
-setup_tools.sh; on a fresh container a unique name is generated and saved.
+setup_tools.sh; on a fresh container you are prompted for a name (Enter accepts a unique default).
 Ctrl+C stops it.
 --background  sign in if needed, then run the tunnel in the detached tmux
               session "vscode-tunnel" and print its URL once it connects.
@@ -28,7 +28,7 @@ EOF
 fi
 
 script_path=$(readlink -f -- "${BASH_SOURCE[0]}")
-source "$(dirname -- "${BASH_SOURCE[0]}")/../shell/init.sh"
+WEBSTUDIO_SKIP_TUNNEL_PROMPT=1 source "$(dirname -- "${BASH_SOURCE[0]}")/../shell/init.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/ui.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/tunnel_config.sh"
 ui_setup

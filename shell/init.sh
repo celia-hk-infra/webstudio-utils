@@ -10,6 +10,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
     exit 2
 fi
 
+_webstudio_did_setup=0
+
 # Check before installing hooks or creating state. Setup bypasses this guard.
 _webstudio_init_repo=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P) || return 1
 WEBSTUDIO_PERSIST_ROOT=${WEBSTUDIO_PERSIST_ROOT:-$(cd -- "$_webstudio_init_repo/.." && pwd -P)}
@@ -29,6 +31,7 @@ if [[ ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 ]] &&
                     return 1
                 fi
             fi
+            _webstudio_did_setup=1
         else
             printf 'When ready, run: bash %q\n' "$_webstudio_init_repo/setup_tools.sh"
             unset _webstudio_init_repo _webstudio_setup_marker
@@ -182,3 +185,13 @@ esac
 if [[ ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 && -x $WEBSTUDIO_PERSIST_ROOT/tools/gh/current/bin/gh && -f $GH_CONFIG_DIR/hosts.yml ]]; then
     gh auth setup-git --hostname github.com || return 1
 fi
+
+# Child launchers suppress this prompt to avoid recursive startup.
+if [[ -t 0 && ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 &&
+      ${WEBSTUDIO_SKIP_TUNNEL_PROMPT:-0} != 1 && $_webstudio_did_setup != 1 ]]; then
+    _webstudio_tunnel_repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+    source "$_webstudio_tunnel_repo/scripts/tunnel_config.sh"
+    webstudio_offer_tunnel "$_webstudio_tunnel_repo"
+    unset _webstudio_tunnel_repo
+fi
+unset _webstudio_did_setup

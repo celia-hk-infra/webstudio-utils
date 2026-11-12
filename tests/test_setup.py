@@ -325,6 +325,48 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
 ''')
         return repo
 
+    def test_init_offers_new_or_stopped_tunnel(self):
+        repo = self.mock_tunnel_repo()
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / '.setup-complete').write_text(str(repo))
+        self.executable(self.persist / 'tools/tmux/bin/tmux', '#!/bin/sh\nexit 1\n')
+        for saved, prompt in [(None, 'Create and start a VS Code tunnel'),
+                              ('saved-name', 'Resume VS Code tunnel saved-name')]:
+            if saved:
+                self.tunnel.mkdir(parents=True, exist_ok=True)
+                (self.tunnel / 'name').write_text(saved)
+            terminal = self.terminal(f'source "{repo}/shell/init.sh"; echo READY')
+            terminal.expect(prompt)
+            terminal.send(b'y\r')
+            terminal.expect('READY')
+            self.assertEqual(terminal.finish(), 0)
+        self.assertEqual((self.persist / 'tunnel-calls').read_text().splitlines(),
+                         ['--background', '--background'])
+
+    def test_fresh_tunnel_name_prompt(self):
+        terminal = self.terminal(
+            f'source "{ROOT}/scripts/tunnel_config.sh"; webstudio_ensure_tunnel_name')
+        terminal.expect('VS Code tunnel name')
+        terminal.send(b'-invalid\r')
+        terminal.expect('Use up to 20')
+        terminal.send(b'my-container\r')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertEqual((self.tunnel / 'name').read_text(), 'my-container\n')
+
+    def test_init_skips_connected_tunnel_prompt(self):
+        repo = self.mock_tunnel_repo()
+        self.state.mkdir(parents=True, exist_ok=True)
+        (self.state / '.setup-complete').write_text(str(repo))
+        self.executable(self.local / 'vscode/bin/code',
+                        '''#!/bin/sh
+echo '{"tunnel":{"tunnel":"Connected"}}'
+''')
+        terminal = self.terminal(f'source "{repo}/shell/init.sh"; echo READY')
+        terminal.expect('already connected')
+        terminal.expect('READY')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertFalse((self.persist / 'tunnel-calls').exists())
+
     def test_tunnel_name_prompt_validates_input(self):
         name_file = self.tunnel / 'name'
         repo = self.mock_tunnel_repo()
