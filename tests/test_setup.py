@@ -93,11 +93,11 @@ p.write_text(json.dumps({'auth_mode':'apikey', 'OPENAI_API_KEY':sys.stdin.read()
         path.write_text(content)
         path.chmod(0o700)
 
-    def run_setup(self, agents='both', key=KEY, success=True):
+    def run_setup(self, agents='both', key=KEY, success=True, provider='--openlux'):
         env = self.env.copy()
         if key is not None:
             env['OPENLUX_API_KEY'] = key
-        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', agents, '--skip-vscode'],
+        result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', agents, '--skip-vscode', provider],
                                 env=env, capture_output=True, text=True)
         self.assertNotIn(KEY, result.stdout + result.stderr)
         if success:
@@ -209,6 +209,8 @@ binary.chmod(0o700)
         terminal.send(b'y\r')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
+        terminal.expect('Override official endpoints with OpenLux?')
+        terminal.send(b'y\r')
         terminal.expect('VS Code tunnel name')
         terminal.send(b'\r')
         terminal.expect('Start the VS Code tunnel when setup finishes?')
@@ -267,6 +269,8 @@ binary.chmod(0o700)
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --skip-vscode')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
+        terminal.expect('Override official endpoints with OpenLux?')
+        terminal.send(b'y\r')
         terminal.expect('OpenLux API key (input hidden)')
         terminal.send(b'\r')
         terminal.expect('A key is required')
@@ -394,11 +398,24 @@ echo 'code 1.0.0'
         self.assertEqual(config.read_text().count('cli_auth_credentials_store ='), 1)
         self.assertIn('[projects."/example"]', config.read_text())
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents both --skip-vscode')
+        terminal.expect('Override official endpoints with OpenLux?')
+        terminal.send(b'y\r')
         terminal.expect('Enter keeps saved credentials')
         terminal.send(b'\r')
         terminal.expect('Setup complete')
         self.assertEqual(terminal.finish(), 0)
         self.assert_credentials()
+
+    def test_official_fresh_and_after_openlux(self):
+        self.run_setup(key=None, provider='--official')
+        self.assertFalse((self.state / '.codex/auth.json').exists())
+        self.assertFalse((self.state / '.claude/settings.json').exists())
+        self.run_setup()
+        self.run_setup(key=None, provider='--official')
+        self.assertNotIn('api.openlux.ai', (self.state / '.codex/config.toml').read_text())
+        self.assertNotIn(KEY, (self.state / '.codex/auth.json').read_text())
+        self.assertNotIn('ANTHROPIC_BASE_URL', (self.state / '.claude/settings.json').read_text())
+        self.assertNotIn(KEY, (self.state / '.claude/settings.json').read_text())
 
     def test_missing_key_fails_before_install(self):
         result = self.run_setup(key=None, success=False)

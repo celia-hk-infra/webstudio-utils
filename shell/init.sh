@@ -132,10 +132,6 @@ unset _webstudio_shell_dir _webstudio_login_file _webstudio_candidate
 # Override a CODEX_HOME inherited from the disposable container home.
 export CODEX_HOME="$WEBSTUDIO_AGENT_STATE_DIR/.codex"
 export CLAUDE_CONFIG_DIR="$WEBSTUDIO_AGENT_STATE_DIR/.claude"
-export ANTHROPIC_BASE_URL="https://api.openlux.ai"
-# Explicit gateway mode disables model discovery in Claude Code 2.1.322.
-unset CLAUDE_CODE_USE_GATEWAY
-export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 
 # Keep GitHub CLI credentials on the persistent mount.
 export GH_CONFIG_DIR="$WEBSTUDIO_AGENT_STATE_DIR/gh"

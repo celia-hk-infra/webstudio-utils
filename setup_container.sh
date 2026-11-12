@@ -10,6 +10,7 @@ gh_version=${WEBSTUDIO_GH_VERSION:-2.103.3}
 claude_version=${WEBSTUDIO_CLAUDE_VERSION:-2.1.322}
 npm_registry=${WEBSTUDIO_NPM_REGISTRY:-https://registry.npmmirror.com}
 agents=
+use_openlux=ask
 selection_explicit=0
 skip_claude=0
 skip_codex=0
@@ -20,12 +21,13 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
-Then enter your OpenLux API key once for the selected agents.
-Without a terminal, selection defaults to both; supply OPENLUX_API_KEY unless
-all selected agents already have saved credentials.
+Choose whether to override official endpoints with OpenLux (default: no).
+Only OpenLux setup asks for an API key. Without a terminal, endpoints default
+to official; use --openlux and OPENLUX_API_KEY to configure OpenLux.
+Use --official to select official endpoints without a prompt.
 GitHub login is required unless --skip-gh-auth is set. Interactive setup starts
 browser login and saves the token in private persistent storage. Unattended
 setup needs a saved GitHub login, GH_TOKEN, or GITHUB_TOKEN.
@@ -56,6 +58,8 @@ while (($#)); do
     --agents)
       (($# >= 2)) || { echo 'Missing value for --agents' >&2; exit 2; }
       agents=$2; selection_explicit=1; shift 2 ;;
+    --openlux) use_openlux=yes; shift ;;
+    --official) use_openlux=no; shift ;;
     --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
@@ -111,8 +115,16 @@ setup_api_key=
 export -n setup_api_key
 if (( ! skip_codex || ! skip_claude )); then
   command -v node >/dev/null || { echo 'node is required to configure agents.' >&2; exit 1; }
+  if [[ $use_openlux == ask ]]; then
+    use_openlux=no
+    if [[ -t 0 ]] && prompt_yes_no 'Override official endpoints with OpenLux? [y/N] '; then
+      use_openlux=yes
+    fi
+  fi
+  if [[ $use_openlux == yes ]]; then
   saved_auth=$(node "$repo_dir/scripts/has_saved_agent_auth.cjs" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$skip_codex" "$skip_claude")
   prompt_openlux_key "$saved_auth"
+  fi
 fi
 # Keep the key in a non-exported shell variable until it is piped to each CLI.
 unset OPENLUX_API_KEY
@@ -297,6 +309,7 @@ codex_login() {
 
 if (( ! skip_codex )); then
   ui_run "Installing Codex $codex_version" install_agent codex "@openai/codex" "$codex_version" Codex
+  if [[ $use_openlux == yes ]]; then
   # Keep this setting at TOML's top level, before any table headers.
   codex_config="$CODEX_HOME/config.toml"
   config_stage=$(mktemp "${codex_config%/*}/.config.XXXXXX")
@@ -323,12 +336,19 @@ if (( ! skip_codex )); then
     ui_run 'Saving the OpenLux key for Codex' codex_login
   fi
   chmod 600 -- "$CODEX_HOME/auth.json"
+  else
+    node "$repo_dir/scripts/restore_official.cjs" codex "$CODEX_HOME"
+  fi
   ui_ok "Codex $codex_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 
 if (( ! skip_claude )); then
   ui_run "Installing Claude Code $claude_version" install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
+  if [[ $use_openlux == yes ]]; then
   printf '%s' "$setup_api_key" | node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json" --key-stdin
+  else
+    node "$repo_dir/scripts/restore_official.cjs" claude "$CLAUDE_CONFIG_DIR"
+  fi
   ui_ok "Claude Code $claude_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/claude"
 fi
 unset setup_api_key

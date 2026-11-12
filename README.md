@@ -67,7 +67,7 @@ codex resume                                   # 也可直接运行 codex
 
 ## 选择智能体
 
-在终端中运行安装脚本时，会显示选择菜单：使用上下方向键移动，空格键选中或取消选中，回车键继续。默认选中两个智能体；按 `q` 取消。随后，在隐藏输入的提示中输入 OpenLux API 密钥。安装脚本会为所有选中的智能体保存密钥，无需分别登录。再次运行时，如果所有选中的智能体都已有密钥，直接按回车即可保留现有凭据。
+在终端中运行安装脚本时，会显示选择菜单：使用上下方向键移动，空格键选中或取消选中，回车键继续。默认选中两个智能体；按 `q` 取消。随后，选择是否用 OpenLux 覆盖官方端点（默认否）。选择否时，使用官方端点并通过 Codex / Claude 的正常登录流程登录；选择是时，在隐藏输入的提示中输入 OpenLux API 密钥。安装脚本会为所有选中的智能体保存密钥，无需分别登录。再次运行时，如果所有选中的智能体都已有密钥，直接按回车即可保留现有凭据。
 
 在脚本中运行（不显示选择菜单）时，请使用：
 
@@ -83,11 +83,11 @@ source shell/init.sh
 
 ## 凭据与网关配置
 
-两个智能体均配置为使用 OpenLux。
+默认使用官方端点。使用 `--openlux` 启用 OpenLux，或 `--official` 跳过询问并使用官方端点。非交互安装默认使用官方端点；OpenLux 模式需要 `--openlux`。切回官方端点会移除先前由安装脚本设置的 OpenLux 端点和密钥，需要重新登录。以下配置仅适用于 OpenLux 模式。
 
 **Codex。** 安装脚本会将 `$CODEX_HOME/config.toml` 中的顶层 `openai_base_url` 设为 `"https://api.openlux.ai/v1"`，保留其他设置，并设置 `cli_auth_credentials_store = "file"`，使认证信息持久化保存在 `$CODEX_HOME/auth.json` 中。密钥通过标准输入传给 `codex login --with-api-key`。重复运行安装脚本会重新应用该 URL；使用 `--skip-codex` 可跳过此步骤。
 
-**Claude Code。** 安装脚本会在持久化的 `$CLAUDE_CONFIG_DIR/settings.json` 和 shell 环境中，将 `ANTHROPIC_BASE_URL` 设为 `https://api.openlux.ai`。Claude 会自行追加 `/v1/messages`。`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 会通过 OpenLux 需要认证的 `/v1/models` 接口，将可用的 Claude 模型加载到 `/model` 中，包括接口新公布的版本。安装脚本会移除旧的 `CLAUDE_CODE_USE_GATEWAY` 设置，因为在此 CLI 版本中，该设置会禁用模型发现功能。
+**Claude Code。** 安装脚本会在持久化的 `$CLAUDE_CONFIG_DIR/settings.json` 中，将 `ANTHROPIC_BASE_URL` 设为 `https://api.openlux.ai`。Claude 会自行追加 `/v1/messages`。`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` 会通过 OpenLux 需要认证的 `/v1/models` 接口，将可用的 Claude 模型加载到 `/model` 中，包括接口新公布的版本。安装脚本会移除旧的 `CLAUDE_CODE_USE_GATEWAY` 设置，因为在此 CLI 版本中，该设置会禁用模型发现功能。
 
 需要了解的细节：
 
