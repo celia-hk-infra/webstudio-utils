@@ -67,17 +67,19 @@ codex resume                                   # 也可直接运行 codex
 
 ## 选择智能体
 
-在终端中运行安装脚本时，会显示选择菜单：使用上下方向键移动，空格键选中或取消选中，回车键继续。默认选中两个智能体；按 `q` 取消。随后，选择是否用 OpenLux 覆盖官方端点（默认否）。选择否时，使用官方端点并通过 Codex / Claude 的正常登录流程登录；选择是时，在隐藏输入的提示中输入 OpenLux API 密钥。安装脚本会为所有选中的智能体保存密钥，无需分别登录。再次运行时，如果所有选中的智能体都已有密钥，直接按回车即可保留现有凭据。
+在终端中运行安装脚本时，会显示选择菜单：使用上下方向键移动，空格键选中或取消选中，回车键继续。默认选中两个智能体；按 `q` 取消。随后，可在相同的多选菜单中选择安装 tmux 和 GitHub CLI（默认全选），再选择是否用 OpenLux 覆盖官方端点（默认否）。选择否时，使用官方端点并通过 Codex / Claude 的正常登录流程登录；选择是时，在隐藏输入的提示中输入 OpenLux API 密钥。安装脚本会为所有选中的智能体保存密钥，无需分别登录。再次运行时，如果所有选中的智能体都已有密钥，直接按回车即可保留现有凭据。
 
 在脚本中运行（不显示选择菜单）时，请使用：
 
 ```bash
-./setup_container.sh --agents both --skip-vscode
+./setup_container.sh --agents both --tools both --official --skip-vscode
 # 其他选项：--agents codex、--agents claude、--agents none
 source shell/init.sh
 ```
 
-没有终端时，默认安装两个智能体。除非所有选中的智能体都已有保存的密钥，否则需要通过环境变量或密钥管理器提供 `OPENLUX_API_KEY`。如果缺少凭据，安装会在下载前停止。选择 `--agents none` 会跳过密钥提示。`--skip-codex` 和 `--skip-claude` 会排除对应智能体，并且不显示选择菜单。跳过某个智能体不会卸载它。
+没有终端时，默认安装两个智能体并使用官方端点。仅在指定 `--openlux` 且选中的智能体缺少保存的密钥时，需要通过环境变量或密钥管理器提供 `OPENLUX_API_KEY`。如果缺少凭据，安装会在下载前停止。选择 `--agents none` 会跳过密钥提示。`--skip-codex` 和 `--skip-claude` 会排除对应智能体，并且不显示选择菜单。跳过某个智能体不会卸载它。
+
+可用 `--tools tmux|gh|both|none` 指定工具，或使用 `--skip-tmux` / `--skip-gh` 跳过对应工具并关闭工具菜单。不选择 GitHub CLI 时也会跳过 GitHub 登录。跳过安装不会卸载已有工具。非交互安装默认选择两个工具。后台隧道需要 tmux；若跳过 tmux 且系统中没有 tmux，菜单只提供前台启动或稍后启动。
 
 两个 CLI 都缓存在 `tools/<agent>/<version>` 中，并复制到本地 `/tmp/webstudio-$UID` 下供运行使用。默认通过 `https://registry.npmmirror.com` 下载；设置 `WEBSTUDIO_NPM_REGISTRY=https://registry.npmjs.org` 可改用官方源。这不会修改全局 npm 设置。
 

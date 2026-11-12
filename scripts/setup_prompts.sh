@@ -18,6 +18,19 @@ choose_agents() {
   fi
 }
 
+choose_tools() {
+  UI_MENU=($((1 - skip_tmux)) $((1 - skip_gh)))
+  ui_menu multi 'Which optional tools should be installed?' \
+    'tmux|Terminal sessions and background VS Code tunnels' \
+    'GitHub CLI|gh commands and GitHub authentication' || return
+  skip_tmux=$((1 - UI_MENU[0]))
+  skip_gh=$((1 - UI_MENU[1]))
+  local chosen=()
+  (( skip_tmux )) || chosen+=(tmux)
+  (( skip_gh )) || chosen+=(gh)
+  ui_answer 'Optional tools' "${chosen[*]:-None}"
+}
+
 prompt_openlux_key() {
   local saved_auth=$1 title='OpenLux API key' valid='.'
   if [[ -n ${OPENLUX_API_KEY:-} ]]; then
@@ -57,11 +70,19 @@ prompt_tunnel_name() {
 
 choose_tunnel_start() {
   local choices=(background foreground no)
+  if (( ${skip_tmux:-0} )) && ! command -v tmux >/dev/null 2>&1; then
+    UI_MENU=(0)
+    ui_menu single 'Start the VS Code tunnel when setup finishes?' \
+      'In this terminal|shows tunnel logs here; Ctrl+C stops it' \
+      'Not now|start it later with scripts/start_vscode_tunnel.sh' || return
+    choices=(foreground no)
+  else
   UI_MENU=(0)
   ui_menu single 'Start the VS Code tunnel when setup finishes?' \
     'In the background|keeps running after you close this terminal (recommended)' \
     'In this terminal|shows tunnel logs here; Ctrl+C stops it' \
     'Not now|start it later with scripts/start_vscode_tunnel.sh' || return
+  fi
   start_tunnel=${choices[UI_MENU[0]]}
   case $start_tunnel in
     background) ui_answer 'Start VS Code tunnel' 'In the background (tmux session vscode-tunnel)' ;;

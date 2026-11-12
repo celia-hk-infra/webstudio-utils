@@ -16,19 +16,25 @@ skip_claude=0
 skip_codex=0
 skip_vscode=0
 skip_gh_auth=0
+skip_gh=0
+skip_tmux=0
+tools_explicit=0
+selected_tools=
 start_tunnel=ask
 tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_container.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 Choose whether to override official endpoints with OpenLux (default: no).
 Only OpenLux setup asks for an API key. Without a terminal, endpoints default
 to official; use --openlux and OPENLUX_API_KEY to configure OpenLux.
 Use --official to select official endpoints without a prompt.
-GitHub login is required unless --skip-gh-auth is set. Interactive setup starts
+Select optional tools with the same menu; both are selected by default.
+Use --tools or --skip-tmux / --skip-gh to choose without a prompt.
+GitHub login is required only when gh is selected, unless --skip-gh-auth is set. Interactive setup starts
 browser login and saves the token in private persistent storage. Unattended
 setup needs a saved GitHub login, GH_TOKEN, or GITHUB_TOKEN.
 Install tmux in persistent storage using Conda, prepare agent tools, and install
@@ -63,6 +69,11 @@ while (($#)); do
     --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
+    --tools)
+      (($# >= 2)) || { echo 'Missing value for --tools' >&2; exit 2; }
+      selected_tools=$2; tools_explicit=1; shift 2 ;;
+    --skip-tmux) skip_tmux=1; tools_explicit=1; shift ;;
+    --skip-gh) skip_gh=1; tools_explicit=1; shift ;;
     --skip-gh-auth) skip_gh_auth=1; shift ;;
     --start-tunnel|--start-tunnel=background) start_tunnel=background; shift ;;
     --start-tunnel=foreground) start_tunnel=foreground; shift ;;
@@ -94,6 +105,17 @@ if [[ -n $agents ]]; then
   esac
 elif (( ! selection_explicit )) && [[ -t 0 ]]; then
   choose_agents
+fi
+if [[ -n $selected_tools ]]; then
+  case $selected_tools in
+    tmux) skip_gh=1 ;;
+    gh) skip_tmux=1 ;;
+    both) ;;
+    none) skip_tmux=1; skip_gh=1 ;;
+    *) echo '--tools must be tmux, gh, both, or none.' >&2; exit 2 ;;
+  esac
+elif (( ! tools_explicit )) && [[ -t 0 ]]; then
+  choose_tools
 fi
 [[ $claude_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
   echo 'WEBSTUDIO_CLAUDE_VERSION must be a numeric release.' >&2; exit 2
@@ -154,6 +176,11 @@ if (( ! skip_vscode )) && [[ $start_tunnel == ask && -t 0 ]]; then
   choose_tunnel_start
 fi
 
+if (( skip_tmux )) && [[ $start_tunnel == background ]] && ! command -v tmux >/dev/null 2>&1; then
+  echo 'Background tunnels require tmux. Select tmux or use --start-tunnel=foreground / --no-start-tunnel.' >&2
+  exit 2
+fi
+
 mkdir -p -- "$WEBSTUDIO_LOCAL_DIR/bin"
 chmod 700 -- "$WEBSTUDIO_LOCAL_DIR"
 UI_LOG="$WEBSTUDIO_LOCAL_DIR/setup.log"
@@ -161,6 +188,7 @@ UI_LOG="$WEBSTUDIO_LOCAL_DIR/setup.log"
 chmod 600 -- "$UI_LOG"
 if [[ -t 0 ]]; then ui_step 'Installing'; fi
 
+if (( ! skip_gh )); then
 # Install the official GitHub CLI archive once on the persistent mount.
 gh_root="$WEBSTUDIO_PERSIST_ROOT/tools/gh"
 gh_release="$gh_root/$gh_version"
@@ -209,6 +237,9 @@ if (( ! skip_gh_auth )); then
   ui_ok 'GitHub authentication ready' 'Git uses gh for HTTPS credentials'
 fi
 
+fi
+
+if (( ! skip_tmux )); then
 # Keep tmux and its libraries together on the persistent mount.
 tmux_prefix="$WEBSTUDIO_PERSIST_ROOT/tools/tmux"
 if [[ ! -x $tmux_prefix/bin/tmux ]]; then
@@ -230,6 +261,7 @@ if [[ ! -x $tmux_prefix/bin/tmux ]]; then
 fi
 ui_ok "$("$tmux_prefix/bin/tmux" -V)" "$tmux_prefix/bin/tmux"
 export PATH="$tmux_prefix/bin:$PATH"
+fi
 
 # The daemon requires its control directory to be private. A migrated Codex
 # install may also retain an absolute link to the previous mount's package.
@@ -363,7 +395,10 @@ installed=()
 (( skip_claude )) || installed+=(claude)
 printf -v init_command 'source %q' "$repo_dir/shell/init.sh"
 ui_bar
-summary=("Agents     ${installed[*]:-none}")
+installed_tools=()
+(( skip_tmux )) || installed_tools+=(tmux)
+(( skip_gh )) || installed_tools+=(gh)
+summary=("Agents     ${installed[*]:-none}" "Tools      ${installed_tools[*]:-none}")
 (( skip_vscode )) || summary+=("Tunnel     $tunnel_name")
 summary+=("Storage    $WEBSTUDIO_PERSIST_ROOT" "Setup log  $UI_LOG" ''
   'New terminals load the environment automatically.' 'In this terminal, run first:' "  $init_command")

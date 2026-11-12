@@ -132,6 +132,8 @@ if args[:2] == ['auth', 'setup-git']:
     def test_github_login_survives_new_home(self):
         self.mock_github_auth()
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('GitHub authentication ready')
         self.assertEqual(terminal.finish(), 0)
         credentials = self.state / 'gh/hosts.yml'
@@ -164,10 +166,37 @@ if args[:2] == ['auth', 'setup-git']:
         self.mock_github_auth()
         self.env['TEST_GH_LOGIN_FAIL'] = '1'
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('Sign in to GitHub.')
         self.assertNotEqual(terminal.finish(), 0)
         self.assertFalse((self.home / '.gitconfig').exists())
         self.assertFalse((self.local / '.setup-complete').exists())
+
+    def test_optional_tools_none_skips_install_and_auth(self):
+        shutil.rmtree(self.persist / 'tools/tmux')
+        shutil.rmtree(self.persist / 'tools/gh')
+        terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents none --skip-vscode')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'a\r')
+        terminal.expect('Setup complete')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertFalse((self.persist / 'tools/tmux').exists())
+        self.assertFalse((self.persist / 'tools/gh').exists())
+        self.assertFalse((self.home / '.gitconfig').exists())
+
+    def test_optional_tools_cli_selections(self):
+        for flags, gh_selected, tmux_selected in [
+            (['--tools', 'none'], False, False),
+            (['--tools', 'gh'], True, False),
+            (['--tools', 'tmux'], False, True),
+            (['--skip-gh', '--skip-tmux'], False, False),
+        ]:
+            result = subprocess.run(['bash', str(ROOT / 'setup_container.sh'), '--agents', 'none',
+                                     '--skip-vscode', *flags], env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual('GitHub CLI' in result.stdout, gh_selected)
+            self.assertEqual(str(self.persist / 'tools/tmux/bin/tmux') in result.stdout, tmux_selected)
 
     def test_tmux_install_and_reuse(self):
         (self.persist / 'tools/tmux/bin/tmux').unlink()
@@ -209,6 +238,8 @@ binary.chmod(0o700)
         terminal.send(b'y\r')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('Override official endpoints with OpenLux?')
         terminal.send(b'y\r')
         terminal.expect('VS Code tunnel name')
@@ -222,6 +253,8 @@ binary.chmod(0o700)
         self.assertTrue((self.local / '.setup-complete').exists())
         self.assertEqual((self.persist / '.webstudio-tunnel/name').read_text(), 'webstudio-persist\n')
         terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('VS Code tunnel name')
         terminal.send(b'\r')
         terminal.expect('Start the VS Code tunnel when setup finishes?')
@@ -269,6 +302,8 @@ binary.chmod(0o700)
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --skip-vscode')
         terminal.expect('Anthropic Claude Code')
         terminal.send(b'\r')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('Override official endpoints with OpenLux?')
         terminal.send(b'y\r')
         terminal.expect('OpenLux API key (input hidden)')
@@ -293,6 +328,8 @@ printf '%s\\n' "${1:-started}" >> "$WEBSTUDIO_PERSIST_ROOT/tunnel-calls"
         name_file = self.persist / '.webstudio-tunnel/name'
         repo = self.mock_tunnel_repo()
         terminal = self.terminal(f'bash "{repo}/setup_container.sh" --agents none --no-start-tunnel')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('VS Code tunnel name')
         terminal.expect('webstudio-persist')
         # Invalid characters are rejected, input stops at 20, and a leading hyphen cannot be submitted.
@@ -398,6 +435,8 @@ echo 'code 1.0.0'
         self.assertEqual(config.read_text().count('cli_auth_credentials_store ='), 1)
         self.assertIn('[projects."/example"]', config.read_text())
         terminal = self.terminal(f'bash "{ROOT}/setup_container.sh" --agents both --skip-vscode')
+        terminal.expect('Which optional tools should be installed?')
+        terminal.send(b'\r')
         terminal.expect('Override official endpoints with OpenLux?')
         terminal.send(b'y\r')
         terminal.expect('Enter keeps saved credentials')
