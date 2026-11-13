@@ -3,6 +3,8 @@
 # Color and animation are used only on terminals; NO_COLOR or redirected
 # output falls back to plain text.
 
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/i18n.sh"
+
 ui_setup() {
   UI_TTY=0
   if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then UI_TTY=1; fi
@@ -28,6 +30,8 @@ ui_setup() {
     UI_DOT='*' UI_SEP='-' UI_SPIN=('|' '/' '-' '\')
   fi
   UI_RUN_PID=
+  UI_STTY=
+  if [[ -t 0 ]]; then UI_STTY=$(stty -g); fi
 }
 
 ui_cols() {
@@ -40,12 +44,20 @@ ui_cols() {
 }
 
 ui_intro() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '\n%s%s%s  %s %s %s' "$UI_MUTED" "$UI_START" "$UI_RESET" "${UI_BADGE:-$UI_BOLD}" "$1" "$UI_RESET"
   if [[ -n ${2:-} ]]; then printf '  %s%s%s' "$UI_DIM" "$2" "$UI_RESET"; fi
   printf '\n%s%s%s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET"
 }
 
 ui_outro() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s%s  %s\n\n' "$UI_MUTED" "$UI_END" "$UI_RESET" "$1"
 }
 
@@ -54,6 +66,10 @@ ui_bar() {
 }
 
 ui_note() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   local line
   for line in "$@"; do
     printf '%s%s%s  %s%s%s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET" "$UI_DIM" "$line" "$UI_RESET"
@@ -62,36 +78,60 @@ ui_note() {
 
 # A completed question: title, then its answer underneath.
 ui_answer() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s%s  %s\n' "$UI_GREEN" "$UI_DONE" "$UI_RESET" "$1"
   printf '%s%s%s  %s%s%s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET" "$UI_DIM" "$2" "$UI_RESET"
   ui_bar
 }
 
 ui_ok() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s%s  %s' "$UI_GREEN" "$UI_OK" "$UI_RESET" "$1"
   if [[ -n ${2:-} ]]; then printf '  %s%s%s' "$UI_MUTED" "$2" "$UI_RESET"; fi
   printf '\n'
 }
 
 ui_step() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s%s  %s%s%s\n' "$UI_ACCENT" "$UI_ACTIVE" "$UI_RESET" "$UI_BOLD" "$1" "$UI_RESET"
 }
 
 ui_warn() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s%s  %s\n' "$UI_YELLOW" "$UI_WARN" "$UI_RESET" "$1" >&2
 }
 
 ui_error() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   printf '%s%s  %s%s\n' "$UI_RED" "$UI_FAIL" "$1" "$UI_RESET" >&2
 }
 
 # Rounded box for the final summary; arguments are plain-text lines. Falls back
 # to railed lines when the box would wrap in a narrow terminal.
 ui_box() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   local title=$1 line width=${#1}
   shift
   for line in "$@"; do (( ${#line} > width )) && width=${#line}; done
-  if (( width + 4 > $(ui_cols) )); then
+  if [[ ${WEBSTUDIO_LANGUAGE:-en} == zh ]] || (( width + 4 > $(ui_cols) )); then
     ui_ok "$title"
     for line in "$@"; do printf '%s%s%s  %s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET" "$line"; done
     return
@@ -123,6 +163,10 @@ ui_last_line() {
 # only on failure. Call it as a plain statement, never after || or &&: Bash
 # ignores set -e inside such contexts, and setup steps rely on set -e.
 ui_run() {
+  local -a translated=()
+  local ui_arg
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   local label=$1 log status=0 pid frame=0 start=$SECONDS hint= cols room
   shift
   log=$(mktemp "${TMPDIR:-/tmp}/webstudio-step.XXXXXX")
@@ -163,6 +207,7 @@ ui_run() {
 
 # Restore the terminal and stop a running step when the script is interrupted.
 ui_cleanup() {
+  if [[ -n ${UI_STTY:-} ]]; then stty "$UI_STTY" 2>/dev/null || true; fi
   if [[ -n ${UI_RUN_PID:-} ]]; then
     pkill -TERM -P "$UI_RUN_PID" 2>/dev/null || true
     kill -TERM "$UI_RUN_PID" 2>/dev/null || true
@@ -175,6 +220,11 @@ ui_cleanup() {
 # "Label|description". Selection state is read from and written to UI_MENU
 # (an array of 0/1 for multi, the chosen index for single).
 ui_menu() {
+  local -a translated=("$1")
+  local ui_arg
+  shift
+  for ui_arg in "$@"; do translated+=("$(ui_text "$ui_arg")"); done
+  set -- "${translated[@]}"
   local mode=$1 title=$2 key suffix i mark pointer label desc width=0 drawn=0 cursor=0 lines
   shift 2
   local -a options=("$@")
@@ -206,10 +256,10 @@ ui_menu() {
       fi
     done
     if [[ $mode == multi ]]; then
-      printf '\r\033[2K%s%s  ↑/↓ move %s space toggle %s a all %s enter confirm %s q cancel%s\n' "$UI_MUTED" "$UI_BAR" \
-        "$UI_SEP" "$UI_SEP" "$UI_SEP" "$UI_SEP" "$UI_RESET"
+      printf '\r\033[2K%s%s  %s%s\n' "$UI_MUTED" "$UI_BAR" \
+        "$(ui_text "↑/↓ move · space toggle · a all · enter confirm · q cancel")" "$UI_RESET"
     else
-      printf '\r\033[2K%s%s  ↑/↓ move %s enter select %s q cancel%s\n' "$UI_MUTED" "$UI_BAR" "$UI_SEP" "$UI_SEP" "$UI_RESET"
+      printf '\r\033[2K%s%s  %s%s\n' "$UI_MUTED" "$UI_BAR" "$(ui_text "↑/↓ move · enter select · q cancel")" "$UI_RESET"
     fi
     IFS= read -rsn1 key || { printf '\033[?25h'; return 130; }
     case $key in
@@ -238,7 +288,7 @@ ui_menu() {
         ;;
       q|Q)
         printf '\033[%dA\r\033[J\033[?25h' "$lines"
-        printf '%s%s  Setup cancelled.%s\n' "$UI_RED" "$UI_FAIL" "$UI_RESET"
+        printf '%s%s  %s%s\n' "$UI_RED" "$UI_FAIL" "$(ui_text 'Setup cancelled.')" "$UI_RESET"
         return 130
         ;;
     esac
@@ -252,8 +302,9 @@ ui_menu() {
 # ui_input RESULT_VAR TITLE DEFAULT ALLOWED MAX MASK VALID ERROR
 ui_input() {
   local -n _ui_result=$1
-  local title=$2 default=$3 allowed=$4 max=$5 mask=$6 valid=$7 error=$8
-  local value= key shown count problem= submitted
+  local title=$(ui_text "$2") default=$3 allowed=$4 max=$5 mask=$6 valid=$7 error=$(ui_text "$8")
+  local value= key shown count problem= submitted input_stty=
+  if [[ -t 0 ]]; then input_stty=$(stty -g); stty -icanon -echo min 1 time 0; fi
   printf '%s%s%s  %s%s%s\n' "$UI_ACCENT" "$UI_ACTIVE" "$UI_RESET" "$UI_BOLD" "$title" "$UI_RESET"
   while :; do
     if [[ $mask == 1 ]]; then
@@ -293,13 +344,14 @@ ui_input() {
         elif [[ $key == $allowed ]] && (( ${#value} < max )); then
           value+=$key
         elif (( ${#value} >= max )); then
-          problem="maximum $max characters"
+          problem="$(ui_text "maximum $max characters")"
         else
-          problem="'$key' is not allowed"
+          problem="$(ui_text "'$key' is not allowed")"
         fi
         ;;
     esac
   done
   printf '\r\033[2K\033[1A\r\033[2K'
+  if [[ -n $input_stty ]]; then stty "$input_stty"; fi
   _ui_result=$submitted
 }

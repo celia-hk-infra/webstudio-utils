@@ -324,3 +324,24 @@ distinct names, such as `webstudio-box-a` and `webstudio-box-b`, with
 `WEBSTUDIO_TUNNEL_NAME` on first launch. Keep tool storage on the shared SFS
 mount and tunnel identity storage local to each container. Editing the same
 SFS files concurrently can still overwrite changes.
+
+Setup asks for **English / 中文** before any other option. For scripted runs use
+`./setup_tools.sh --language en` or `--language zh` (`WEBSTUDIO_LANGUAGE` also works).
+GitHub device login continues automatically after browser authorization; no
+browser is launched in the headless container.
+
+For the personal egress host (Mac, laptop, or VPS), clone **webstudio-utils**
+and run the host script:
+
+```bash
+git clone https://github.com/celia-hk-infra/webstudio-utils.git
+cd webstudio-utils
+bash scripts/start_egress_host.sh --language en
+```
+
+Install GOST v3, Python 3 and Dev Tunnels on that host first, following
+`vendor/codex-local-egress/README.md`. Keep the host running and securely copy its
+`vendor/codex-local-egress/connection.env` to the container. Enter the absolute
+file path in setup, or paste its three lines. Both endpoints must use the same
+Dev Tunnels account. The host script automatically initializes the egress
+submodule pinned by the checkout; no manual checkout or submodule command is needed.

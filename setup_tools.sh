@@ -25,7 +25,7 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_tools.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_tools.sh [--language en|zh] [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 After installation, configure optional personal egress and an isolated OpenLux backup.
@@ -56,6 +56,9 @@ EOF
 
 while (($#)); do
   case $1 in
+    --language)
+      (($# >= 2)) || { echo "Missing --language value" >&2; exit 2; }
+      export WEBSTUDIO_LANGUAGE=$2; shift 2 ;;
     --tunnel-name)
       (($# >= 2)) || { echo 'Missing value for --tunnel-name' >&2; exit 2; }
       tunnel_name=$2
@@ -93,6 +96,7 @@ ui_setup
 trap ui_cleanup EXIT
 trap 'exit 130' INT TERM
 source "$repo_dir/scripts/setup_prompts.sh"
+choose_language
 if [[ -t 0 ]]; then ui_intro 'WebStudio tools setup' 'Safe to rerun; answers are saved'; fi
 
 if [[ -n $agents ]]; then
@@ -210,8 +214,8 @@ if (( ! skip_gh_auth )); then
     fi
     ui_bar
     ui_step 'Sign in to GitHub.'
-    ui_note 'The token is stored in the private persistent gh directory.'
-    (umask 077; gh auth login --hostname github.com --git-protocol https --web --insecure-storage)
+    ui_note 'The token is stored in the private persistent gh directory.' 'Open https://github.com/login/device in your browser and enter the code below. Setup continues automatically.'
+    (umask 077; printf "\n" | GH_BROWSER=true BROWSER=true gh auth login --hostname github.com --git-protocol https --web --insecure-storage 2>&1 | python3 -u "$repo_dir/scripts/auth_output.py" "$WEBSTUDIO_LANGUAGE")
     ui_bar
   fi
   # Restore Git's credential helper even when the container home is new.
@@ -396,7 +400,7 @@ unset setup_api_key
 
 if [[ -t 0 && -f $WEBSTUDIO_AGENT_STATE_DIR/egress/connection.env ]]; then
   if (( ! skip_codex )) && prompt_yes_no 'Sign in to official Codex through egress now? [y/N] '; then
-    "$WEBSTUDIO_AGENT_STATE_DIR/bin/codex" --provider official login --device-auth
+    "$WEBSTUDIO_AGENT_STATE_DIR/bin/codex" --provider official login --device-auth 2>&1 | python3 -u "$repo_dir/scripts/egress_output.py" "$WEBSTUDIO_LANGUAGE"
   fi
   if (( ! skip_claude )) && prompt_yes_no 'Sign in to official Claude through egress now? [y/N] '; then
     "$WEBSTUDIO_AGENT_STATE_DIR/bin/claude" --provider official auth login

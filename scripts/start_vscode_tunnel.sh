@@ -179,7 +179,7 @@ wait_for_tunnel() {
 }
 
 print_tunnel_access() {
-  printf '%s%s%s  Open   %s%s%s%s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET" "$UI_BOLD" "$UI_ACCENT" "$(tunnel_url)" "$UI_RESET"
+  printf '%s%s%s  %s   %s%s%s%s\n' "$UI_MUTED" "$UI_BAR" "$UI_RESET" "$(ui_text Open)" "$UI_BOLD" "$UI_ACCENT" "$(tunnel_url)" "$UI_RESET"
   if session_running; then
     ui_note "Logs   tmux attach -t $session   (detach: Ctrl+B, then D)"
   fi
@@ -232,7 +232,7 @@ case $mode in
       fi
       ui_step 'Sign in to authorize the VS Code tunnel'
       ui_note "Open the link below and enter the code. The sign-in is kept in this container's tunnel directory."
-      "$CLI" tunnel user login --provider "${VSCODE_TUNNEL_PROVIDER:-github}" --cli-data-dir "$CLI_DATA_DIR"
+      "$CLI" tunnel user login --provider "${VSCODE_TUNNEL_PROVIDER:-github}" --cli-data-dir "$CLI_DATA_DIR" 2>&1 | python3 -u "$(dirname -- "$script_path")/auth_output.py" "${WEBSTUDIO_LANGUAGE:-en}"
       ui_bar
     fi
     if ! session_running; then

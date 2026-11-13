@@ -76,7 +76,7 @@ class SetupTests(unittest.TestCase):
         self.home.mkdir()
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(('WEBSTUDIO_', 'ANTHROPIC_', 'CLAUDE_', 'OPENLUX_', 'CODEX_', 'GH_', 'GITHUB_', 'VSCODE_'))}
-        self.env.update(HOME=str(self.home), WEBSTUDIO_PERSIST_ROOT=str(self.persist),
+        self.env.update(WEBSTUDIO_LANGUAGE='en', HOME=str(self.home), WEBSTUDIO_PERSIST_ROOT=str(self.persist),
                         WEBSTUDIO_LOCAL_DIR=str(self.local), WEBSTUDIO_TUNNEL_DIR=str(self.tunnel), TERM='xterm')
         self.executable(self.persist / 'tools/tmux/bin/tmux', '#!/bin/sh\nexit 0\n')
         self.executable(self.persist / 'tools/gh/2.103.3/bin/gh', '#!/bin/sh\nexit 0\n')
@@ -123,12 +123,31 @@ if args[:2] == ['auth', 'status']:
     sys.exit(0 if (state / 'hosts.yml').exists() or os.environ.get('GH_TOKEN') else 1)
 if args[:2] == ['auth', 'login']:
     assert '--web' in args and '--insecure-storage' in args
+    assert os.environ.get('GH_BROWSER') == 'true'
+    assert sys.stdin.readline() == '\\n'
     if os.environ.get('TEST_GH_LOGIN_FAIL'):
         sys.exit(1)
     (state / 'hosts.yml').write_text('test credential')
 if args[:2] == ['auth', 'setup-git']:
     (pathlib.Path.home() / '.gitconfig').write_text('test credential helper')
 ''')
+
+    def test_language_is_first_and_chinese_setup(self):
+        self.env.pop('WEBSTUDIO_LANGUAGE', None)
+        terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents none --skip-vscode --tools none')
+        terminal.expect('Language / 语言')
+        self.assertNotIn(b'WebStudio tools setup', terminal.output)
+        terminal.send(DOWN + b'\r')
+        terminal.expect('安装完成')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertNotIn(b'Setup complete', terminal.output)
+
+    def test_device_auth_output_translates_code(self):
+        result = subprocess.run(['python3', str(ROOT / 'scripts/auth_output.py'), 'zh'],
+                                input='Welcome to dev tunnels!\nBrowse to https://github.com/login/device and enter the code: TEST-CODE\n',
+                                text=True, capture_output=True)
+        self.assertIn('请打开 https://github.com/login/device 并输入代码：TEST-CODE', result.stdout)
+        self.assertNotIn('Welcome', result.stdout)
 
     def test_github_login_survives_new_home(self):
         self.mock_github_auth()

@@ -2,6 +2,10 @@
 # Sourced by setup_tools.sh after scripts/ui.sh and ui_setup; uses its
 # skip_codex, skip_claude, tunnel_name, and start_tunnel variables.
 # prompt_yes_no is also used by shell/init.sh and needs nothing else.
+if ! declare -F ui_text >/dev/null; then
+  source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/i18n.sh"
+fi
+
 choose_agents() {
   UI_MENU=($((1 - skip_codex)) $((1 - skip_claude)))
   ui_menu multi 'Which coding agents should be installed?' \
@@ -95,12 +99,22 @@ choose_tunnel_start() {
 prompt_yes_no() {
   local answer
   while :; do
-    printf '%s' "$1"
+    printf '%s%s%s  %s' "${UI_MUTED:-}" "${UI_BAR:-|}" "${UI_RESET:-}" "$(ui_text "$1")"
     IFS= read -r answer || { printf '\n'; return 1; }
     case $answer in
       y|Y|yes|YES|Yes) return 0 ;;
       ''|n|N|no|NO|No) return 1 ;;
-      *) printf 'Please enter y or n.\n' ;;
+      *) printf '%s\n' "$(ui_text 'Please enter y or n.')" ;;
     esac
   done
+}
+
+choose_language() {
+  if [[ -z ${WEBSTUDIO_LANGUAGE:-} && -t 0 ]]; then
+    UI_MENU=(0)
+    ui_menu single 'Language / 语言' 'English|Setup in English' '中文|使用中文安装' || return
+    if (( UI_MENU[0] == 1 )); then WEBSTUDIO_LANGUAGE=zh; else WEBSTUDIO_LANGUAGE=en; fi
+  fi
+  export WEBSTUDIO_LANGUAGE=${WEBSTUDIO_LANGUAGE:-en}
+  case $WEBSTUDIO_LANGUAGE in en|zh) ;; *) ui_error '--language must be en or zh'; return 2 ;; esac
 }

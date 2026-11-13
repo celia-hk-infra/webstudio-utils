@@ -229,7 +229,7 @@ source shell/init.sh
 
 ### Personal egress and OpenLux backup
 
-Initialize the pinned integration with `git submodule update --init --recursive`.
+Setup and the egress host script initialize the pinned integration automatically.
 Setup installs agents first, then offers a guided personal-egress connection and
 an optional OpenLux backup. Select tmux to supervise the egress connection in the
 `webstudio-egress` session. This is separate from `vscode-tunnel`.
@@ -252,3 +252,23 @@ login. Use `tmux attach -t webstudio-egress` to inspect the connection. Reconnec
 on a new container by rerunning setup; persistent credentials survive but running
 processes do not. Routed interactive Codex uses `--no-daemon` to avoid reusing a
 server with stale authentication or a different proxy environment.
+
+安装的第一个选项为 **English / 中文**。也可使用
+`./setup_tools.sh --language zh` 或 `--language en`，或设置
+`WEBSTUDIO_LANGUAGE`。GitHub 设备码授权完成后会自动继续，无需按回车，
+也不会尝试在无图形界面的容器中打开浏览器。
+
+个人网络出口的另一端（Mac、笔记本或 VPS）也请克隆 **webstudio-utils**，
+然后运行出口脚本：
+
+```bash
+git clone https://github.com/celia-hk-infra/webstudio-utils.git
+cd webstudio-utils
+bash scripts/start_egress_host.sh --language zh
+```
+
+请先按照 `vendor/codex-local-egress/README.md` 安装 GOST v3、Python 3 和
+Dev Tunnels。保持出口进程运行，将生成的
+`vendor/codex-local-egress/connection.env` 安全复制到容器，在安装界面输入其
+绝对路径，或直接粘贴其中三行。两端必须使用同一个 Dev Tunnels 账号。
+出口脚本会自动初始化仓库固定版本的子模块，无需手动切换提交或执行子模块命令。
