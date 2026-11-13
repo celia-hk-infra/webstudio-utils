@@ -330,6 +330,12 @@ Setup asks for **English / 中文** before any other option. For scripted runs u
 GitHub device login continues automatically after browser authorization; no
 browser is launched in the headless container.
 
+The container's `webstudio-egress` tmux session runs a supervisor that retries
+exited clients and restarts stalled clients after three failed proxy checks.
+Checks run 10 seconds apart after a 30-second startup grace period, so restarting
+the Mac host with the same configuration recovers automatically. For a manual
+foreground connection, run `python3 scripts/egress_supervisor.py`.
+
 For the personal egress host (Mac, laptop, or VPS), clone **webstudio-utils**
 and run the host script:
 

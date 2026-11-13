@@ -58,7 +58,7 @@ setup_egress() {
       chmod_devtunnel_state
     )
     local command
-    printf -v command 'EGRESS_STATE_DIR=%q bash %q' "$EGRESS_STATE_DIR" "$egress/remote.sh"
+    printf -v command 'EGRESS_STATE_DIR=%q python3 %q' "$EGRESS_STATE_DIR" "$repo_dir/scripts/egress_supervisor.py"
     tmux new-session -d -s webstudio-egress "$command"
   fi
   for ((attempt=0; attempt<10; attempt++)); do

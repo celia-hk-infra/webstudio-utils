@@ -233,6 +233,11 @@ Setup and the egress host script initialize the pinned integration automatically
 Setup installs agents first, then offers a guided personal-egress connection and
 an optional OpenLux backup. Select tmux to supervise the egress connection in the
 `webstudio-egress` session. This is separate from `vscode-tunnel`.
+The client supervisor retries after exits and restarts a stalled client after
+three failed end-to-end proxy checks (10 seconds apart, with a 30-second startup
+grace period). Restarting the Mac host with the same connection configuration
+therefore recovers automatically while this tmux session remains running.
+For a manual foreground connection, run `python3 scripts/egress_supervisor.py`.
 
 `codex` and `claude` select healthy personal egress when configured, displaying
 the route on stderr. If it is unavailable, interactive launches ask before using
