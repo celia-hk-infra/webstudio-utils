@@ -1,0 +1,3 @@
+[submodule "vendor/codex-local-egress"]
+	path = vendor/codex-local-egress
+	url = https://github.com/celia-hk-infra/codex-local-egress.git

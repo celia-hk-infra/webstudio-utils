@@ -241,12 +241,14 @@ binary.chmod(0o700)
         terminal.send(b'\r')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
-        terminal.expect('Override official endpoints with OpenLux?')
-        terminal.send(b'y\r')
         terminal.expect('VS Code tunnel name')
         terminal.send(b'\r')
         terminal.expect('Start the VS Code tunnel when setup finishes?')
         terminal.send(b'\r')
+        terminal.expect('Configure personal egress now?')
+        terminal.send(b'n\r')
+        terminal.expect('Configure OpenLux as an optional backup?')
+        terminal.send(b'y\r')
         terminal.expect('LOADED:' + str(self.state / '.codex'))
         self.assertEqual(terminal.finish(), 0)
         calls = self.persist / 'tunnel-calls'
@@ -305,7 +307,9 @@ binary.chmod(0o700)
         terminal.send(b'\r')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
-        terminal.expect('Override official endpoints with OpenLux?')
+        terminal.expect('Configure personal egress now?')
+        terminal.send(b'n\r')
+        terminal.expect('Configure OpenLux as an optional backup?')
         terminal.send(b'y\r')
         terminal.expect('OpenLux API key (input hidden)')
         terminal.send(b'\r')
@@ -453,8 +457,8 @@ echo 'code 1.0.0'
         self.assertEqual(run('--status').returncode, 1)
 
     def assert_credentials(self):
-        codex = self.state / '.codex/auth.json'
-        claude = self.state / '.claude/settings.json'
+        codex = self.state / 'providers/openlux/codex/auth.json'
+        claude = self.state / 'providers/openlux/claude/settings.json'
         self.assertEqual(json.loads(codex.read_text())['OPENAI_API_KEY'], KEY)
         data = json.loads(claude.read_text())
         self.assertEqual(data['env']['ANTHROPIC_AUTH_TOKEN'], KEY)
@@ -498,11 +502,11 @@ echo 'code 1.0.0'
     def test_both_and_rerun_preserve_preferences(self):
         self.run_setup()
         self.assert_credentials()
-        settings = self.state / '.claude/settings.json'
+        settings = self.state / 'providers/openlux/claude/settings.json'
         data = json.loads(settings.read_text())
         data['model'] = 'user-model'
         settings.write_text(json.dumps(data))
-        config = self.state / '.codex/config.toml'
+        config = self.state / 'providers/openlux/codex/config.toml'
         config.write_text(config.read_text() + '\n[projects."/example"]\ntrust_level = "trusted"\n')
         self.run_setup(key=None)
         self.assert_credentials()
@@ -513,7 +517,9 @@ echo 'code 1.0.0'
         terminal = self.terminal(f'bash "{ROOT}/setup_tools.sh" --agents both --skip-vscode')
         terminal.expect('Which optional tools should be installed?')
         terminal.send(b'\r')
-        terminal.expect('Override official endpoints with OpenLux?')
+        terminal.expect('Configure personal egress now?')
+        terminal.send(b'n\r')
+        terminal.expect('Configure OpenLux as an optional backup?')
         terminal.send(b'y\r')
         terminal.expect('Enter keeps saved credentials')
         terminal.send(b'\r')
@@ -527,15 +533,14 @@ echo 'code 1.0.0'
         self.assertFalse((self.state / '.claude/settings.json').exists())
         self.run_setup()
         self.run_setup(key=None, provider='--official')
-        self.assertNotIn('api.openlux.ai', (self.state / '.codex/config.toml').read_text())
-        self.assertNotIn(KEY, (self.state / '.codex/auth.json').read_text())
-        self.assertNotIn('ANTHROPIC_BASE_URL', (self.state / '.claude/settings.json').read_text())
-        self.assertNotIn(KEY, (self.state / '.claude/settings.json').read_text())
+        self.assertFalse((self.state / '.codex/auth.json').exists())
+        self.assertFalse((self.state / '.claude/settings.json').exists())
+        self.assert_credentials()
 
-    def test_missing_key_fails_before_install(self):
+    def test_missing_key_fails_after_install(self):
         result = self.run_setup(key=None, success=False)
         self.assertIn('Set OPENLUX_API_KEY', result.stderr)
-        self.assertFalse(self.local.exists())
+        self.assertTrue((self.state / 'bin/codex-real').exists())
 
     def test_single_agent_and_none(self):
         self.run_setup(agents='none', key=None)
@@ -548,7 +553,7 @@ echo 'code 1.0.0'
     def test_invalid_key_and_invalid_state_preserve_files(self):
         self.run_setup(key='invalid key', success=False)
         self.run_setup()
-        settings = self.state / '.claude/settings.json'
+        settings = self.state / 'providers/openlux/claude/settings.json'
         before = settings.read_bytes()
         state = settings.parent / '.claude.json'
         state.write_text('{"secret":"' + KEY + '", BROKEN')

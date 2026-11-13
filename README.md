@@ -226,3 +226,29 @@ source shell/init.sh
 如 `webstudio-box-a` 和 `webstudio-box-b`。
 工具存储仍共享 SFS，隧道身份保存在各自容器本地。
 同时修改相同的 SFS 文件仍可能互相覆盖。
+
+### Personal egress and OpenLux backup
+
+Initialize the pinned integration with `git submodule update --init --recursive`.
+Setup installs agents first, then offers a guided personal-egress connection and
+an optional OpenLux backup. Select tmux to supervise the egress connection in the
+`webstudio-egress` session. This is separate from `vscode-tunnel`.
+
+`codex` and `claude` select healthy personal egress when configured, displaying
+the route on stderr. If it is unavailable, interactive launches ask before using
+OpenLux. Unattended launches fail instead of silently switching providers.
+Use `codex --provider openlux` or `claude --provider official` to choose explicitly;
+`WEBSTUDIO_PROVIDER` supports the same choices plus `auto`.
+Without configured egress, auto uses official endpoints directly.
+
+Official state remains in `.codex` and `.claude`. OpenLux credentials and history
+live separately under `$WEBSTUDIO_AGENT_STATE_DIR/providers/openlux`. Existing
+OpenLux installations are migrated with private backups before removing the old
+gateway settings. Official login may be required afterward. `--openlux` configures
+the backup; `--official` skips backup setup and preserves any existing backup.
+
+After setup, run `codex login --device-auth` or `claude auth login` for official
+login. Use `tmux attach -t webstudio-egress` to inspect the connection. Reconnect
+on a new container by rerunning setup; persistent credentials survive but running
+processes do not. Routed interactive Codex uses `--no-daemon` to avoid reusing a
+server with stale authentication or a different proxy environment.

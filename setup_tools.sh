@@ -28,9 +28,9 @@ usage() {
 Usage: ./setup_tools.sh [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
-Choose whether to override official endpoints with OpenLux (default: no).
+After installation, configure optional personal egress and an isolated OpenLux backup.
 Only OpenLux setup asks for an API key. Without a terminal, endpoints default
-to official; use --openlux and OPENLUX_API_KEY to configure OpenLux.
+to official; use --openlux and OPENLUX_API_KEY to configure the backup.
 Use --official to select official endpoints without a prompt.
 Select optional tools with the same menu; both are selected by default.
 Use --tools or --skip-tmux / --skip-gh to choose without a prompt.
@@ -135,21 +135,6 @@ export WEBSTUDIO_SETUP_RUNNING=1
 WEBSTUDIO_REPORT_LINK_CONFLICTS=1 source "$repo_dir/shell/init.sh"
 setup_api_key=
 export -n setup_api_key
-if (( ! skip_codex || ! skip_claude )); then
-  command -v node >/dev/null || { echo 'node is required to configure agents.' >&2; exit 1; }
-  if [[ $use_openlux == ask ]]; then
-    use_openlux=no
-    if [[ -t 0 ]] && prompt_yes_no 'Override official endpoints with OpenLux? [y/N] '; then
-      use_openlux=yes
-    fi
-  fi
-  if [[ $use_openlux == yes ]]; then
-  saved_auth=$(node "$repo_dir/scripts/has_saved_agent_auth.cjs" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$skip_codex" "$skip_claude")
-  prompt_openlux_key "$saved_auth"
-  fi
-fi
-# Keep the key in a non-exported shell variable until it is piped to each CLI.
-unset OPENLUX_API_KEY
 
 source "$repo_dir/scripts/tunnel_config.sh"
 tunnel_dir="$WEBSTUDIO_TUNNEL_DIR"
@@ -316,16 +301,52 @@ install_agent() {
   fi
 
   mkdir -p -- "$WEBSTUDIO_AGENT_STATE_DIR/bin"
-  ln -sfnT -- "$agent_cache/node_modules/.bin/$agent_name" "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name"
+  ln -sfnT -- "$agent_cache/node_modules/.bin/$agent_name" "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name-real"
+  printf '#!/usr/bin/env bash\nexec bash %q %q "$@"\n' "$repo_dir/scripts/agent-launch.sh" "$agent_name" > "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name.launcher"
+  chmod 700 "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name.launcher"
+  ln -sfnT -- "$agent_name.launcher" "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name"
   ln -sfnT -- "$WEBSTUDIO_AGENT_STATE_DIR/bin/$agent_name" "$WEBSTUDIO_LOCAL_DIR/bin/$agent_name"
 }
 
 codex_login() {
-  printf '%s' "$setup_api_key" | "$WEBSTUDIO_LOCAL_DIR/bin/codex" login --with-api-key
+  printf '%s' "$setup_api_key" | "$WEBSTUDIO_AGENT_STATE_DIR/bin/codex-real" login --with-api-key
 }
 
 if (( ! skip_codex )); then
   ui_run "Installing Codex $codex_version" install_agent codex "@openai/codex" "$codex_version" Codex
+fi
+if (( ! skip_claude )); then
+  ui_run "Installing Claude Code $claude_version" install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
+fi
+migration_agents=()
+(( skip_codex )) || migration_agents+=(codex)
+(( skip_claude )) || migration_agents+=(claude)
+node "$repo_dir/scripts/migrate_agent_providers.cjs" "$WEBSTUDIO_AGENT_STATE_DIR" "${migration_agents[@]}"
+source "$repo_dir/scripts/setup_egress.sh"
+if (( ! skip_codex || ! skip_claude )); then setup_egress; fi
+# Backup credentials are independent of the official agent homes.
+official_codex_home=$CODEX_HOME
+official_claude_dir=$CLAUDE_CONFIG_DIR
+export CODEX_HOME="$WEBSTUDIO_AGENT_STATE_DIR/providers/openlux/codex"
+export CLAUDE_CONFIG_DIR="$WEBSTUDIO_AGENT_STATE_DIR/providers/openlux/claude"
+mkdir -p -m 700 "$CODEX_HOME" "$CLAUDE_CONFIG_DIR"
+if (( ! skip_codex || ! skip_claude )); then
+  command -v node >/dev/null || { echo 'node is required to configure agents.' >&2; exit 1; }
+  if [[ $use_openlux == ask ]]; then
+    use_openlux=no
+    if [[ -t 0 ]] && prompt_yes_no 'Configure OpenLux as an optional backup? [y/N] '; then
+      use_openlux=yes
+    fi
+  fi
+  if [[ $use_openlux == yes ]]; then
+  saved_auth=$(node "$repo_dir/scripts/has_saved_agent_auth.cjs" "$CODEX_HOME" "$CLAUDE_CONFIG_DIR" "$skip_codex" "$skip_claude")
+  prompt_openlux_key "$saved_auth"
+  fi
+fi
+# Keep the key in a non-exported shell variable until it is piped to each CLI.
+unset OPENLUX_API_KEY
+
+if (( ! skip_codex )); then
   if [[ $use_openlux == yes ]]; then
   # Keep this setting at TOML's top level, before any table headers.
   codex_config="$CODEX_HOME/config.toml"
@@ -353,22 +374,34 @@ if (( ! skip_codex )); then
     ui_run 'Saving the OpenLux key for Codex' codex_login
   fi
   chmod 600 -- "$CODEX_HOME/auth.json"
+  touch "$WEBSTUDIO_AGENT_STATE_DIR/providers/openlux/codex.ready"
   else
-    node "$repo_dir/scripts/restore_official.cjs" codex "$CODEX_HOME"
+    :
   fi
   ui_ok "Codex $codex_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/codex"
 fi
 
 if (( ! skip_claude )); then
-  ui_run "Installing Claude Code $claude_version" install_agent claude "@anthropic-ai/claude-code" "$claude_version" 'Claude Code'
   if [[ $use_openlux == yes ]]; then
   printf '%s' "$setup_api_key" | node "$repo_dir/scripts/configure_claude.cjs" "$CLAUDE_CONFIG_DIR/settings.json" --key-stdin
+  touch "$WEBSTUDIO_AGENT_STATE_DIR/providers/openlux/claude.ready"
   else
-    node "$repo_dir/scripts/restore_official.cjs" claude "$CLAUDE_CONFIG_DIR"
+    :
   fi
   ui_ok "Claude Code $claude_version ready" "$WEBSTUDIO_LOCAL_DIR/bin/claude"
 fi
+export CODEX_HOME="$official_codex_home" CLAUDE_CONFIG_DIR="$official_claude_dir"
+
 unset setup_api_key
+
+if [[ -t 0 && -f $WEBSTUDIO_AGENT_STATE_DIR/egress/connection.env ]]; then
+  if (( ! skip_codex )) && prompt_yes_no 'Sign in to official Codex through egress now? [y/N] '; then
+    "$WEBSTUDIO_AGENT_STATE_DIR/bin/codex" --provider official login --device-auth
+  fi
+  if (( ! skip_claude )) && prompt_yes_no 'Sign in to official Claude through egress now? [y/N] '; then
+    "$WEBSTUDIO_AGENT_STATE_DIR/bin/claude" --provider official auth login
+  fi
+fi
 
 if (( ! skip_vscode )); then
   ui_run 'Installing the VS Code tunnel CLI' "$repo_dir/scripts/start_vscode_tunnel.sh" --install-only
