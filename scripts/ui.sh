@@ -13,14 +13,15 @@ ui_setup() {
     UI_RESET=$'\033[0m' UI_BOLD=$'\033[1m' UI_DIM=$'\033[2m'
     UI_RED=$'\033[31m' UI_GREEN=$'\033[32m' UI_YELLOW=$'\033[33m'
     UI_ACCENT=$'\033[36m' UI_MUTED=$'\033[90m' UI_BADGE=$'\033[1;30;46m'
-    if [[ ${TERM:-} == *256color* || ${COLORTERM:-} == @(truecolor|24bit) ]]; then
+    if [[ ${TERM:-} == *256color* || ${COLORTERM:-} == truecolor || ${COLORTERM:-} == 24bit ]]; then
       UI_ACCENT=$'\033[38;5;75m' UI_MUTED=$'\033[38;5;242m' UI_GREEN=$'\033[38;5;78m'
       UI_RED=$'\033[38;5;203m' UI_YELLOW=$'\033[38;5;221m' UI_BADGE=$'\033[1;38;5;16;48;5;75m'
     fi
   fi
   local charmap=${LC_ALL:-${LC_CTYPE:-${LANG:-}}}
   if command -v locale >/dev/null 2>&1; then charmap=$(locale charmap 2>/dev/null); fi
-  if [[ ${charmap^^} == *UTF-8* || ${charmap^^} == *UTF8* ]]; then
+  charmap=$(printf '%s' "$charmap" | tr '[:lower:]' '[:upper:]')
+  if [[ $charmap == *UTF-8* || $charmap == *UTF8* ]]; then
     UI_BAR='│' UI_START='┌' UI_END='└' UI_ACTIVE='◆' UI_DONE='◇' UI_OK='✔' UI_FAIL='✖'
     UI_WARN='▲' UI_POINTER='❯' UI_ON='◼' UI_OFF='◻' UI_RADIO_ON='●' UI_RADIO_OFF='○'
     UI_DOT='•' UI_SEP='·' UI_SPIN=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
@@ -301,7 +302,7 @@ ui_menu() {
 # VALID; otherwise ERROR is shown and editing continues.
 # ui_input RESULT_VAR TITLE DEFAULT ALLOWED MAX MASK VALID ERROR
 ui_input() {
-  local -n _ui_result=$1
+  local _ui_result_name=$1
   local title=$(ui_text "$2") default=$3 allowed=$4 max=$5 mask=$6 valid=$7 error=$(ui_text "$8")
   local value= key shown count problem= submitted input_stty=
   if [[ -t 0 ]]; then input_stty=$(stty -g); stty -icanon -echo min 1 time 0; fi
@@ -353,5 +354,5 @@ ui_input() {
   done
   printf '\r\033[2K\033[1A\r\033[2K'
   if [[ -n $input_stty ]]; then stty "$input_stty"; fi
-  _ui_result=$submitted
+  printf -v "$_ui_result_name" '%s' "$submitted"
 }
