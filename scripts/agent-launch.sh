@@ -11,9 +11,12 @@ if [[ ${1:-} == --provider ]]; then provider=${2:?}; shift 2; fi
 case ${1:-} in --help|-h|--version|-V) exec "$real" "$@";; esac
 export EGRESS_STATE_DIR="$state/egress"
 egress="$repo/vendor/codex-local-egress/remote.sh"
+direct="$repo/scripts/direct_egress.py"
+direct_config="$EGRESS_STATE_DIR/direct-proxy.json"
 if [[ $provider == auto ]]; then
-  if [[ -f $EGRESS_STATE_DIR/connection.env ]]; then
-    if bash "$egress" check >/dev/null 2>&1; then provider=official
+  if [[ -f $direct_config || -f $EGRESS_STATE_DIR/connection.env ]]; then
+    if [[ -f $direct_config ]] && python3 "$direct" check >/dev/null 2>&1; then provider=official
+    elif [[ ! -f $direct_config ]] && bash "$egress" check >/dev/null 2>&1; then provider=official
     elif [[ -f $state/providers/openlux/$agent.ready && -t 0 ]]; then
       read -r -p 'Personal egress unavailable. Use OpenLux for this session? [y/N] ' reply
       case $reply in y|Y|yes) provider=openlux;; *) exit 1;; esac
@@ -44,6 +47,10 @@ if [[ $agent == codex ]]; then
     case $arg in login|logout|exec|review|mcp|plugin|app-server|remote-control|completion|update|doctor|sandbox|debug|apply|queue|archive|delete|migrate-rollouts|migrate-nfs-db|unarchive|cloud|exec-server|features|help) subcommand=1; break;; esac
   done
   (( subcommand )) || args=(--no-daemon "${args[@]}")
+fi
+if [[ $provider == official && -f $direct_config ]]; then
+  echo 'Using direct VPS egress · official authentication' >&2
+  exec python3 "$direct" exec "$real" "${args[@]}"
 fi
 if [[ $provider == official && -f $EGRESS_STATE_DIR/connection.env ]]; then
   echo 'Using personal egress · official authentication' >&2

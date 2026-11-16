@@ -488,6 +488,8 @@ echo 'code 1.0.0'
 
     def test_tunnel_identity_is_container_local(self):
         self.run_setup(agents='none', key=None)
+        subprocess.run(['bash', '-c', f'source "{ROOT}/scripts/tunnel_config.sh" && webstudio_ensure_tunnel_name'],
+                       env=self.env, check=True, capture_output=True)
         original = (self.tunnel / 'name').read_text()
         other = self.root / 'other-container/.webstudio-tunnel'
         env = dict(self.env, WEBSTUDIO_TUNNEL_DIR=str(other))
@@ -563,6 +565,12 @@ echo 'code 1.0.0'
 
     def test_single_agent_and_none(self):
         self.run_setup(agents='none', key=None)
+        self.assertFalse(self.tunnel.exists())
+        self.assertTrue((self.state / '.skip-vscode-tunnel').exists())
+        terminal = self.terminal(f'source "{ROOT}/shell/init.sh"; echo READY')
+        terminal.expect('READY')
+        self.assertEqual(terminal.finish(), 0)
+        self.assertNotIn(b'VS Code tunnel', terminal.output)
         self.assertFalse((self.state / '.codex/auth.json').exists())
         self.run_setup(agents='claude')
         self.assertFalse((self.state / '.codex/auth.json').exists())

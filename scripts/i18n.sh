@@ -45,6 +45,9 @@ Open https://github.com/login/device in your browser and enter the code below. S
 GitHub authentication ready|GitHub 身份验证已就绪
 Git uses gh for HTTPS credentials|Git 使用 gh 提供 HTTPS 凭据
 Configure personal egress now? [y/N] |现在配置个人网络出口吗？[y/N] 
+Use a direct HTTPS proxy on your VPS? [y/N]|在 VPS 上使用直连 HTTPS 代理吗？[y/N]
+Installing direct GOST client|正在安装直连 GOST 客户端
+Direct VPS egress ready.|VPS 直连出口已就绪。
 Configure OpenLux as an optional backup? [y/N] |配置 OpenLux 作为可选备用服务吗？[y/N] 
 Sign in to official Codex through egress now? [y/N] |现在通过个人出口登录官方 Codex 吗？[y/N] 
 Sign in to official Claude through egress now? [y/N] |现在通过个人出口登录官方 Claude 吗？[y/N] 

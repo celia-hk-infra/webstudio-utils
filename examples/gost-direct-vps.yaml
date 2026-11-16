@@ -1,0 +1,12 @@
+# Copy to a private file on the VPS and replace the password.
+# Coolify's Traefik terminates TLS and issues the public certificate.
+services:
+  - name: webstudio-egress
+    addr: ":8080"
+    handler:
+      type: http
+      auth:
+        username: codexproxy
+        password: REPLACE_WITH_LONG_RANDOM_SECRET
+    listener:
+      type: tcp

@@ -18,6 +18,7 @@ skip_vscode=0
 skip_gh_auth=0
 skip_gh=0
 skip_tmux=0
+direct_egress_requested=0
 tools_explicit=0
 selected_tools=
 start_tunnel=ask
@@ -25,13 +26,15 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_tools.sh [--language en|zh] [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_tools.sh [--language en|zh] [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--direct-egress] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 After installation, configure optional personal egress and an isolated OpenLux backup.
 Only OpenLux setup asks for an API key. Without a terminal, endpoints default
 to official; use --openlux and OPENLUX_API_KEY to configure the backup.
 Use --official to select official endpoints without a prompt.
+Use --direct-egress to configure an authenticated HTTPS proxy on your VPS.
+Use --skip-vscode to install agents without installing or starting a VS Code tunnel.
 Select optional tools with the same menu; both are selected by default.
 Use --tools or --skip-tmux / --skip-gh to choose without a prompt.
 GitHub login is required only when gh is selected, unless --skip-gh-auth is set. Interactive setup starts
@@ -69,6 +72,7 @@ while (($#)); do
       agents=$2; selection_explicit=1; shift 2 ;;
     --openlux) use_openlux=yes; shift ;;
     --official) use_openlux=no; shift ;;
+    --direct-egress) direct_egress_requested=1; shift ;;
     --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
@@ -140,29 +144,31 @@ WEBSTUDIO_REPORT_LINK_CONFLICTS=1 source "$repo_dir/shell/init.sh"
 setup_api_key=
 export -n setup_api_key
 
-source "$repo_dir/scripts/tunnel_config.sh"
-tunnel_dir="$WEBSTUDIO_TUNNEL_DIR"
-mkdir -p -m 700 -- "$tunnel_dir/cli-data"
-chmod 700 -- "$tunnel_dir" "$tunnel_dir/cli-data"
-if [[ -z $tunnel_name ]]; then
-  if [[ -s $tunnel_dir/name ]]; then
-    IFS= read -r tunnel_name < "$tunnel_dir/name"
-  else
-    tunnel_name=$(webstudio_default_tunnel_name)
+if (( ! skip_vscode )); then
+  source "$repo_dir/scripts/tunnel_config.sh"
+  tunnel_dir="$WEBSTUDIO_TUNNEL_DIR"
+  mkdir -p -m 700 -- "$tunnel_dir/cli-data"
+  chmod 700 -- "$tunnel_dir" "$tunnel_dir/cli-data"
+  if [[ -z $tunnel_name ]]; then
+    if [[ -s $tunnel_dir/name ]]; then
+      IFS= read -r tunnel_name < "$tunnel_dir/name"
+    else
+      tunnel_name=$(webstudio_default_tunnel_name)
+    fi
+    if [[ -t 0 ]]; then
+      [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || tunnel_name=webstudio
+      prompt_tunnel_name "$tunnel_name"
+    fi
   fi
-  if (( ! skip_vscode )) && [[ -t 0 ]]; then
-    [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || tunnel_name=webstudio
-    prompt_tunnel_name "$tunnel_name"
+  [[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || {
+    echo 'Tunnel name must contain only letters, digits, and hyphens (up to 20 characters).' >&2
+    exit 2
+  }
+  printf '%s\n' "$tunnel_name" > "$tunnel_dir/name"
+  chmod 600 -- "$tunnel_dir/name"
+  if [[ $start_tunnel == ask && -t 0 ]]; then
+    choose_tunnel_start
   fi
-fi
-[[ $tunnel_name =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,19}$ ]] || {
-  echo 'Tunnel name must contain only letters, digits, and hyphens (up to 20 characters).' >&2
-  exit 2
-}
-printf '%s\n' "$tunnel_name" > "$tunnel_dir/name"
-chmod 600 -- "$tunnel_dir/name"
-if (( ! skip_vscode )) && [[ $start_tunnel == ask && -t 0 ]]; then
-  choose_tunnel_start
 fi
 
 if (( skip_tmux )) && [[ $start_tunnel == background ]] && ! command -v tmux >/dev/null 2>&1; then
@@ -398,7 +404,7 @@ export CODEX_HOME="$official_codex_home" CLAUDE_CONFIG_DIR="$official_claude_dir
 
 unset setup_api_key
 
-if [[ -t 0 && -f $WEBSTUDIO_AGENT_STATE_DIR/egress/connection.env ]]; then
+if [[ -t 0 && ( -f $WEBSTUDIO_AGENT_STATE_DIR/egress/connection.env || -f $WEBSTUDIO_AGENT_STATE_DIR/egress/direct-proxy.json ) ]]; then
   if (( ! skip_codex )) && prompt_yes_no 'Sign in to official Codex through egress now? [y/N] '; then
     "$WEBSTUDIO_AGENT_STATE_DIR/bin/codex" --provider official login --device-auth 2>&1 | python3 -u "$repo_dir/scripts/egress_output.py" "$WEBSTUDIO_LANGUAGE"
   fi
@@ -433,6 +439,12 @@ fi
 ui_box 'Setup complete' "${summary[@]}"
 
 # Mark successful installation on persistent storage.
+if (( skip_vscode )); then
+  touch "$WEBSTUDIO_AGENT_STATE_DIR/.skip-vscode-tunnel"
+  chmod 600 -- "$WEBSTUDIO_AGENT_STATE_DIR/.skip-vscode-tunnel"
+else
+  rm -f -- "$WEBSTUDIO_AGENT_STATE_DIR/.skip-vscode-tunnel"
+fi
 printf '%s\n' "$repo_dir" > "$WEBSTUDIO_AGENT_STATE_DIR/.setup-complete"
 chmod 600 -- "$WEBSTUDIO_AGENT_STATE_DIR/.setup-complete"
 unset WEBSTUDIO_SETUP_RUNNING

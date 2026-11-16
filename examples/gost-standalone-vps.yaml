@@ -1,0 +1,16 @@
+# Example for a new VPS with GOST listening directly on public TCP 443.
+# Replace the password and hostname. Keep the real file private (mode 600).
+# Obtain a publicly trusted certificate before starting GOST.
+services:
+  - name: webstudio-egress
+    addr: ":443"
+    handler:
+      type: http
+      auth:
+        username: codexproxy
+        password: REPLACE_WITH_LONG_RANDOM_SECRET
+    listener:
+      type: tls
+      tls:
+        certFile: /etc/letsencrypt/live/proxy.example.com/fullchain.pem
+        keyFile: /etc/letsencrypt/live/proxy.example.com/privkey.pem

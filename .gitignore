@@ -8,3 +8,12 @@ __pycache__/
 # Local staging and editor noise
 *.swp
 .DS_Store
+
+# Private egress credentials and TLS keys
+direct-proxy.json
+client-url
+connection.env
+*.key
+*.pem
+*.p12
+*.pfx

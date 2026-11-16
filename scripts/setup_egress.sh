@@ -1,9 +1,31 @@
 #!/usr/bin/env bash
 # Sourced by setup_tools.sh; dependency output is logged by the shared UI.
+setup_direct_egress() {
+  if (( direct_egress_requested )); then
+    [[ -t 0 ]] || { ui_error '--direct-egress requires a terminal to enter the proxy URL privately.'; return 2; }
+    python3 "$repo_dir/scripts/direct_egress.py" configure || return
+  fi
+  if ! python3 "$repo_dir/scripts/direct_egress.py" check; then
+    ui_error 'Direct VPS proxy check failed. Check DNS, TLS, credentials, and OCI ingress rules.'
+    return 1
+  fi
+  ui_run 'Installing direct GOST client' python3 "$repo_dir/scripts/install_direct_gost.py" || return
+  ui_ok 'Direct VPS egress ready.'
+}
+
 setup_egress() {
   local egress="$repo_dir/vendor/codex-local-egress" input stage answer attempt
+  if (( direct_egress_requested )) || [[ -f $WEBSTUDIO_AGENT_STATE_DIR/egress/direct-proxy.json ]]; then
+    setup_direct_egress
+    return
+  fi
   [[ -t 0 ]] || return 0
   prompt_yes_no 'Configure personal egress now? [y/N] ' || return 0
+  if prompt_yes_no 'Use a direct HTTPS proxy on your VPS? [y/N]'; then
+    direct_egress_requested=1
+    setup_direct_egress
+    return
+  fi
   ui_step 'Personal egress'
   ui_run 'Preparing pinned egress tools' git -C "$repo_dir" submodule update --init -- vendor/codex-local-egress
   export EGRESS_STATE_DIR="$WEBSTUDIO_AGENT_STATE_DIR/egress"

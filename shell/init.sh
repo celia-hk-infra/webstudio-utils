@@ -188,7 +188,8 @@ fi
 
 # Child launchers suppress this prompt to avoid recursive startup.
 if [[ -t 0 && ${WEBSTUDIO_SETUP_RUNNING:-0} != 1 &&
-      ${WEBSTUDIO_SKIP_TUNNEL_PROMPT:-0} != 1 && $_webstudio_did_setup != 1 ]]; then
+      ${WEBSTUDIO_SKIP_TUNNEL_PROMPT:-0} != 1 &&
+      ! -f $WEBSTUDIO_AGENT_STATE_DIR/.skip-vscode-tunnel && $_webstudio_did_setup != 1 ]]; then
     _webstudio_tunnel_repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
     source "$_webstudio_tunnel_repo/scripts/tunnel_config.sh"
     webstudio_offer_tunnel "$_webstudio_tunnel_repo"

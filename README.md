@@ -8,6 +8,7 @@
 - [目录与文件存放位置](#目录与文件存放位置)
 - [选择智能体](#选择智能体)
 - [凭据与网关配置](#凭据与网关配置)
+- [VPS 直连出口完整配置](docs/direct-vps-egress.md)
 - [容器重启后](#容器重启后)
 - [迁移已有的 Codex 历史记录](#迁移已有的-codex-历史记录)
 - [故障排查](#故障排查)
@@ -277,3 +278,8 @@ Dev Tunnels。保持出口进程运行，将生成的
 `vendor/codex-local-egress/connection.env` 安全复制到容器，在安装界面输入其
 绝对路径，或直接粘贴其中三行。两端必须使用同一个 Dev Tunnels 账号。
 出口脚本会自动初始化仓库固定版本的子模块，无需手动切换提交或执行子模块命令。
+
+如果有公网 VPS，可改用[直连 HTTPS 代理配置](docs/direct-vps-egress.md)。
+文档包含全新 Ubuntu VPS 和已有 Coolify VPS 两种配置方式。
+此方式不需要 Dev Tunnels 账号或中继；只安装助手、不安装 VS Code 隧道时，
+使用 `./setup_tools.sh --skip-vscode --direct-egress`。

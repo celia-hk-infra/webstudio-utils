@@ -11,6 +11,7 @@ use a different location.
 - [What lives where](#what-lives-where)
 - [Choosing agents](#choosing-agents)
 - [Credentials and gateway configuration](#credentials-and-gateway-configuration)
+- [Direct VPS egress setup](docs/direct-vps-egress.md)
 - [After a container restart](#after-a-container-restart)
 - [Moving existing Codex history](#moving-existing-codex-history)
 - [Troubleshooting](#troubleshooting)
@@ -351,3 +352,8 @@ Install GOST v3, Python 3 and Dev Tunnels on that host first, following
 file path in setup, or paste its three lines. Both endpoints must use the same
 Dev Tunnels account. The host script automatically initializes the egress
 submodule pinned by the checkout; no manual checkout or submodule command is needed.
+
+For any public VPS, use the [direct HTTPS proxy setup](docs/direct-vps-egress.md)
+instead. The guide covers both a fresh Ubuntu VPS and an existing Coolify VPS.
+It needs no Dev Tunnels account or relay and works with
+`./setup_tools.sh --skip-vscode --direct-egress` for agent-only access.
