@@ -8,3 +8,6 @@ __pycache__/
 # Local staging and editor noise
 *.swp
 .DS_Store
+
+# Personal egress connection credentials
+connection.env
