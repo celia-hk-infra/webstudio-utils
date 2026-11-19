@@ -35,6 +35,11 @@ script_path=$(readlink -f -- "${BASH_SOURCE[0]}")
 WEBSTUDIO_SKIP_TUNNEL_PROMPT=1 source "$(dirname -- "${BASH_SOURCE[0]}")/../shell/init.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/ui.sh"
 source "$(dirname -- "${BASH_SOURCE[0]}")/tunnel_config.sh"
+# The standalone CLI otherwise encrypts token.json with the OS hostname.
+# ModelArts can change that hostname across restarts while retaining work/.
+# Keep credentials in the private per-container CLI directory, like gh auth.
+export VSCODE_CLI_USE_FILE_KEYCHAIN=1
+export VSCODE_CLI_DISABLE_KEYCHAIN_ENCRYPT=1
 ui_setup
 mode=foreground
 case "${1:-}" in

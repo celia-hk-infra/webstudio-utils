@@ -136,6 +136,8 @@ source shell/init.sh
 `$WEBSTUDIO_TUNNEL_DIR/name` 中的名称和
 `$WEBSTUDIO_TUNNEL_DIR/cli-data` 中的身份与登录数据。
 默认目录为容器本地的 `/home/ma-user/work/.webstudio-tunnel`；
+登录凭据采用文件存储，不使用依赖主机名的加密，并通过私有目录及文件权限保护，
+避免容器重启后主机名变化导致凭据无法读取。旧的主机名加密凭据可能需要重新登录一次。
 工具和下载缓存仍在共享 SFS 上。
 
 新容器没有保存的名称时，启动脚本会生成并保存唯一名称，然后引导登录，

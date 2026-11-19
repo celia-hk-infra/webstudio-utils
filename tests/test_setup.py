@@ -427,6 +427,7 @@ echo '{"tunnel":{"tunnel":"Connected"}}'
         for runtime_file in ('runtime/bin/patchelf', 'runtime/lib/libstdc++.so.6'):
             self.executable(vscode / runtime_file, '')
         self.executable(vscode / 'local/bin/code', '''#!/usr/bin/env bash
+[[ $VSCODE_CLI_USE_FILE_KEYCHAIN == 1 && $VSCODE_CLI_DISABLE_KEYCHAIN_ENCRYPT == 1 ]] || exit 9
 for ((i = 1; i < $#; i++)); do
   next=$((i + 1))
   [[ ${!i} == --cli-data-dir ]] && data=${!next}

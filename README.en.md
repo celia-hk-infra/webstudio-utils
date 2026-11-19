@@ -65,7 +65,11 @@ After setup, manage the tunnel directly:
 
 The tunnel launcher also sources `shell/init.sh`, so it passes the agent
 environment to VS Code terminals. It keeps the tunnel's CLI identity and
-sign-in data in this container's work directory, and reuses its saved name. The server
+sign-in data in this container's work directory, and reuses its saved name.
+Credentials are stored without hostname-dependent encryption and protected by
+private directory/file permissions, so a changed container hostname does not
+invalidate saved logins. Existing hostname-encrypted credentials may require
+one new sign-in after a hostname change. The server
 installation runs on local `/tmp` storage and is rebuilt when a container is
 replaced. A sign-in may still be needed if the stored credential expires or is
 revoked. Do not run the same tunnel identity from two containers at once.
