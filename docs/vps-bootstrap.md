@@ -24,9 +24,17 @@ cd webstudio-utils
 sudo ./setup_vps.sh
 ```
 
-The installer asks for the public IPv4 address or hostname, certificate contact
-email, and acceptance of the Let's Encrypt subscriber agreement. For explicit
-arguments:
+The installer detects its public IPv4 using `https://ifconfig.me/ip`, then asks:
+
+```text
+Detected public IP: YOUR_VPS_IP
+Press Enter to use it, or enter another IP/hostname:
+```
+
+Detection connects directly over HTTPS without inherited proxy settings. If it
+fails, enter the address manually. The installer then asks for a certificate
+contact email and acceptance of the Let's Encrypt subscriber agreement.
+`--address` skips detection and the address prompt for explicit arguments:
 
 ```bash
 sudo ./setup_vps.sh --address YOUR_VPS_IP --email you@example.com --agree-tos

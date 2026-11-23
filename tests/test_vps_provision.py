@@ -26,6 +26,37 @@ class VpsSetupTests(unittest.TestCase):
             with self.subTest(host=host), self.assertRaises(ValueError):
                 server.endpoint(host)
 
+    def test_detect_ip_uses_direct_ipv4_and_rejects_invalid_responses(self):
+        for body, expected in [('8.8.8.8\n', '8.8.8.8'), ('10.0.0.1', None),
+                               ('<html>error</html>', None), ('2001:4860:4860::8888', None)]:
+            with self.subTest(body=body), patch.object(server.subprocess, 'run',
+                    return_value=subprocess.CompletedProcess([], 0, body)) as run:
+                self.assertEqual(server.detect_public_ip(), expected)
+                command = run.call_args.args[0]
+                self.assertIn('-4', command)
+                self.assertEqual(command[command.index('--noproxy') + 1], '*')
+        for error in (FileNotFoundError(), subprocess.TimeoutExpired('curl', 12)):
+            with patch.object(server.subprocess, 'run', side_effect=error):
+                self.assertIsNone(server.detect_public_ip())
+        with patch.object(server.subprocess, 'run', return_value=subprocess.CompletedProcess([], 22, '8.8.8.8')):
+            self.assertIsNone(server.detect_public_ip())
+
+    def test_detected_ip_is_confirmed_or_overridden(self):
+        with patch.object(server, 'detect_public_ip', return_value='8.8.8.8'), \
+                patch('builtins.input', return_value='') as prompt, patch('builtins.print'):
+            self.assertEqual(server.select_address(), '8.8.8.8')
+            self.assertIn('Press Enter', prompt.call_args.args[0])
+        with patch.object(server, 'detect_public_ip', return_value='8.8.8.8'), \
+                patch('builtins.input', return_value='proxy.example.org'), patch('builtins.print'):
+            self.assertEqual(server.select_address(), 'proxy.example.org')
+        with patch.object(server, 'detect_public_ip', return_value=None), \
+                patch('builtins.input', return_value='1.1.1.1'), patch('builtins.print'):
+            self.assertEqual(server.select_address(), '1.1.1.1')
+        with patch.object(server, 'detect_public_ip') as detect, patch('builtins.input') as prompt:
+            self.assertEqual(server.select_address('proxy.example.org'), 'proxy.example.org')
+            detect.assert_not_called()
+            prompt.assert_not_called()
+
     def test_credentials_survive_rerun_and_address_change_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)

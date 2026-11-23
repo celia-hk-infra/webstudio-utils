@@ -50,6 +50,35 @@ def endpoint(value):
     return value, False
 
 
+def detect_public_ip():
+    """Suggest the VPS's direct public IPv4, without inheriting a proxy route."""
+    try:
+        result = subprocess.run(
+            ['curl', '-q', '-4', '--fail', '--silent', '--show-error',
+             '--noproxy', '*', '--connect-timeout', '5', '--max-time', '10',
+             'https://ifconfig.me/ip'],
+            capture_output=True, text=True, timeout=12, check=False)
+        if result.returncode:
+            return None
+        address = ipaddress.IPv4Address(result.stdout.strip())
+        return str(address) if address.is_global else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def select_address(explicit=None):
+    if explicit is not None:
+        return endpoint(explicit)[0]
+    detected = detect_public_ip()
+    if detected:
+        print(f'Detected public IP: {detected}')
+        value = input('Press Enter to use it, or enter another IP/hostname: ').strip() or detected
+    else:
+        print('Could not detect a public IPv4 address; enter it manually.')
+        value = input('Proxy public IPv4 address or hostname: ').strip()
+    return endpoint(value)[0]
+
+
 def atomic(path, value, mode=0o600):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,7 +366,7 @@ WantedBy=timers.target
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--address', help='Public IPv4 address or DNS hostname')
+    parser.add_argument('--address', help='Public IPv4 or hostname; otherwise detect and confirm interactively')
     parser.add_argument('--email', help='Certificate contact email')
     parser.add_argument('--agree-tos', action='store_true', help="Accept Let's Encrypt subscriber agreement")
     parser.add_argument('--renew', action='store_true', help=argparse.SUPPRESS)
@@ -349,7 +378,7 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX)
             renew()
         return
-    host = args.address or input('Proxy public IPv4 address or hostname: ').strip()
+    host = select_address(args.address)
     email = args.email or input('Certificate contact email: ').strip()
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
         parser.error('Enter a valid email address')
