@@ -19,6 +19,7 @@ skip_gh_auth=0
 skip_gh=0
 skip_tmux=0
 direct_egress_requested=0
+provision_vps_requested=0
 tools_explicit=0
 selected_tools=
 start_tunnel=ask
@@ -26,14 +27,15 @@ tunnel_name=${WEBSTUDIO_TUNNEL_NAME:-}
 
 usage() {
   cat <<'EOF'
-Usage: ./setup_tools.sh [--language en|zh] [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--direct-egress] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
+Usage: ./setup_tools.sh [--language en|zh] [--tunnel-name NAME] [--agents codex|claude|both|none] [--openlux | --official] [--direct-egress | --setup-vps] [--skip-codex] [--skip-claude] [--skip-vscode] [--tools tmux|gh|both|none] [--skip-tmux] [--skip-gh] [--skip-gh-auth] [--start-tunnel[=background|foreground] | --no-start-tunnel]
 
 Choose agents with Up/Down, Space to toggle, and Enter to continue.
 After installation, configure optional personal egress and an isolated OpenLux backup.
 Only OpenLux setup asks for an API key. Without a terminal, endpoints default
 to official; use --openlux and OPENLUX_API_KEY to configure the backup.
 Use --official to select official endpoints without a prompt.
-Use --direct-egress to configure an authenticated HTTPS proxy on your VPS.
+Use --direct-egress to configure an existing authenticated HTTPS proxy.
+Use --setup-vps to provision a fresh Ubuntu VPS over SSH and configure direct egress.
 Use --skip-vscode to install agents without installing or starting a VS Code tunnel.
 Select optional tools with the same menu; both are selected by default.
 Use --tools or --skip-tmux / --skip-gh to choose without a prompt.
@@ -73,6 +75,7 @@ while (($#)); do
     --openlux) use_openlux=yes; shift ;;
     --official) use_openlux=no; shift ;;
     --direct-egress) direct_egress_requested=1; shift ;;
+    --setup-vps) provision_vps_requested=1; shift ;;
     --skip-codex) skip_codex=1; selection_explicit=1; shift ;;
     --skip-claude) skip_claude=1; selection_explicit=1; shift ;;
     --skip-vscode) skip_vscode=1; shift ;;
@@ -92,6 +95,11 @@ done
 
 if (( skip_vscode )) && [[ $start_tunnel == @(background|foreground) ]]; then
   echo '--start-tunnel cannot be combined with --skip-vscode.' >&2
+  exit 2
+fi
+
+if (( direct_egress_requested && provision_vps_requested )); then
+  echo "Choose --direct-egress or --setup-vps, not both." >&2
   exit 2
 fi
 

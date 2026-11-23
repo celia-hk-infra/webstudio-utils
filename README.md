@@ -9,6 +9,7 @@
 - [选择智能体](#选择智能体)
 - [凭据与网关配置](#凭据与网关配置)
 - [VPS 直连出口完整配置](docs/direct-vps-egress.md)
+- [VPS 容器化部署与 WebStudio 客户端配置（无需域名）](docs/vps-bootstrap.md)
 - [容器重启后](#容器重启后)
 - [迁移已有的 Codex 历史记录](#迁移已有的-codex-历史记录)
 - [故障排查](#故障排查)

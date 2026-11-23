@@ -151,8 +151,8 @@ def check(env):
         time.sleep(1)
 
 
-def configure(path):
-    url = valid_url(getpass.getpass("VPS HTTPS proxy URL: ").strip())
+def save_url(path, url):
+    url = valid_url(url)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(path.parent, 0o700)
     fd, staged = tempfile.mkstemp(prefix=".direct-proxy.", dir=path.parent)
@@ -166,6 +166,10 @@ def configure(path):
         if os.path.exists(staged):
             os.unlink(staged)
     print(f"Saved private proxy configuration: {path}")
+
+
+def configure(path):
+    save_url(path, getpass.getpass("VPS HTTPS proxy URL: ").strip())
 
 
 def main():

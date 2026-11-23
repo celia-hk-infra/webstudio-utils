@@ -14,6 +14,11 @@ setup_direct_egress() {
 }
 
 setup_egress() {
+  if (( ${provision_vps_requested:-0} )); then
+    [[ -t 0 ]] || { ui_error "--setup-vps requires a terminal; use scripts/provision_vps.py with explicit options for unattended setup."; return 2; }
+    python3 "$repo_dir/scripts/provision_vps.py" || return
+    return 0
+  fi
   local egress="$repo_dir/vendor/codex-local-egress" input stage answer attempt
   if (( direct_egress_requested )) || [[ -f $WEBSTUDIO_AGENT_STATE_DIR/egress/direct-proxy.json ]]; then
     setup_direct_egress

@@ -6,6 +6,11 @@ Coolify** and the existing Oracle Cloud VPS with Coolify. The direct route does
 not use Microsoft Dev Tunnels for new agent connections. It does not provide VS
 Code editor access or a system-wide VPN.
 
+For the recommended two-part setup on a fresh VPS, including **without a
+domain**, see [the containerized VPS + WebStudio guide](vps-bootstrap.md).
+GOST and certificate issuance/renewal run in isolated containers. The manual
+hostname-based recipes below remain available as alternative deployments.
+
 ## Traffic path
 
 ```text

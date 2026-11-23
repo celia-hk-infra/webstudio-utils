@@ -12,6 +12,7 @@ use a different location.
 - [Choosing agents](#choosing-agents)
 - [Credentials and gateway configuration](#credentials-and-gateway-configuration)
 - [Direct VPS egress setup](docs/direct-vps-egress.md)
+- [Containerized VPS setup + WebStudio client (domain optional)](docs/vps-bootstrap.md)
 - [After a container restart](#after-a-container-restart)
 - [Moving existing Codex history](#moving-existing-codex-history)
 - [Troubleshooting](#troubleshooting)
