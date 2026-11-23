@@ -128,7 +128,9 @@ loaded certificate and restarts GOST only when needed. It records the digest
 after a successful restart, so a failed restart is retried on the next run.
 Certbot never controls Docker from inside its container. Renewal and setup use
 the same host lock to avoid overlapping challenge listeners. Dry-run renewal
-does not replace the active certificate or trigger a restart.
+does not replace the active certificate or trigger a restart. During setup it
+shows progress and skips Certbot's randomized renewal sleep; scheduled renewals
+retain their normal timing behavior.
 
 Credentials and certificates survive container replacement and reboot. Reruns
 preserve credentials, but restart the proxy and briefly interrupt connections.

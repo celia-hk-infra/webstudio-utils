@@ -202,8 +202,12 @@ class VpsSetupTests(unittest.TestCase):
             run.reset_mock()
             server.renew()
             self.assertEqual(run.call_count, 1)
+            self.assertIn('--quiet', run.call_args.args[0])
+            self.assertNotIn('--no-random-sleep-on-renew', run.call_args.args[0])
             server.renew(dry_run=True)
             self.assertIn('--dry-run', run.call_args.args[0])
+            self.assertIn('--no-random-sleep-on-renew', run.call_args.args[0])
+            self.assertNotIn('--quiet', run.call_args.args[0])
             self.assertEqual(marker.read_text(), 'new-cert\n')
 
     def test_container_and_network_conflicts_are_preserved(self):

@@ -213,10 +213,15 @@ def certificate_digest():
 
 
 def renew(dry_run=False):
-    args = ['renew', '--cert-name', 'webstudio-egress', '--quiet']
+    args = ['renew', '--cert-name', 'webstudio-egress']
     if dry_run:
-        args.append('--dry-run')
+        print('Testing certificate renewal (dry run); this may take a minute...', flush=True)
+        args += ['--dry-run', '--no-random-sleep-on-renew']
+    else:
+        args.append('--quiet')
     run(certbot_command(args))
+    if dry_run:
+        print('Certificate renewal test passed.', flush=True)
     if not dry_run:
         digest = certificate_digest()
         marker = STATE / 'loaded-certificate'
@@ -349,6 +354,7 @@ WantedBy=timers.target
     # a running short-lived certificate without its renewal schedule.
     run(['systemctl', 'enable', '--now', 'webstudio-certbot.timer'])
     renew(dry_run=True)
+    print('Checking proxy authentication and HTTPS forwarding...', flush=True)
     for attempt in range(5):
         try:
             probe(f'https://{host}:443', authenticated=False)
