@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Run agents through an authenticated HTTPS proxy on a user-owned VPS."""
-import getpass
 import json
 import os
 from pathlib import Path
@@ -169,7 +168,7 @@ def save_url(path, url):
 
 
 def configure(path):
-    save_url(path, getpass.getpass("VPS HTTPS proxy URL: ").strip())
+    save_url(path, input("VPS HTTPS proxy URL (visible, includes password): ").strip())
 
 
 def main():

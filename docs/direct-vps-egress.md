@@ -139,7 +139,7 @@ client configuration.
    PY
    ```
 
-   Keep `/etc/gost/client-url` private. Copy its single line to the hidden
+   Keep `/etc/gost/client-url` private. Copy its single line to the visible
    WebStudio configuration prompt below using a secure channel. Do not commit
    either private file.
 
@@ -330,7 +330,7 @@ cd /path/to/webstudio-utils
 source shell/init.sh
 ```
 
-At the hidden prompt, enter the complete URL from the VPS's private
+At the visible proxy URL prompt, enter the complete URL from the VPS's private
 `client-url` file. Transfer that file securely. Do not paste its password into
 shell commands, Git, or issue trackers. `--skip-vscode` avoids VS Code tunnel
 installation and startup and saves a preference that suppresses later shell
@@ -346,7 +346,8 @@ python3 scripts/direct_egress.py configure
 python3 scripts/direct_egress.py check && echo 'VPS proxy OK'
 ```
 
-The `configure` prompt hides input and atomically writes the URL to
+The `configure` prompt shows input, including the password; keep the terminal
+private. It atomically writes the URL to
 `$WEBSTUDIO_AGENT_STATE_DIR/egress/direct-proxy.json` with mode 600. Setup also
 installs a checksum-verified GOST v3.3.3 client under persistent `tools/gost/`
 and caches the compressed archive under `cache/gost/`. On an existing install,

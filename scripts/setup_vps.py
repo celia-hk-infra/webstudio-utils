@@ -367,7 +367,7 @@ WantedBy=timers.target
     atomic(STATE / 'loaded-certificate', certificate_digest() + '\n')
     print(f'Proxy ready: {host}:443\nPrivate client URL: {STATE}/client-url')
     print('On WebStudio: ./setup_tools.sh --agents codex --official --skip-vscode --direct-egress')
-    print(f'Read the private URL with sudo cat {STATE}/client-url and paste it at the hidden prompt.')
+    print(f'Read the private URL with sudo cat {STATE}/client-url and paste it at the visible proxy URL prompt (keep the terminal private).')
 
 
 def main():

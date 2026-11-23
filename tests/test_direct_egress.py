@@ -54,7 +54,7 @@ class DirectEgressTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'egress/direct-proxy.json'
             url = 'https://user:longsecret@egress.example.org:8443'
-            with patch.object(direct.getpass, 'getpass', return_value=url):
+            with patch('builtins.input', return_value=url):
                 direct.configure(path)
             self.assertEqual(direct.read_url(path), url)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)

@@ -2,7 +2,7 @@
 # Sourced by setup_tools.sh; dependency output is logged by the shared UI.
 setup_direct_egress() {
   if (( direct_egress_requested )); then
-    [[ -t 0 ]] || { ui_error '--direct-egress requires a terminal to enter the proxy URL privately.'; return 2; }
+    [[ -t 0 ]] || { ui_error '--direct-egress requires a terminal to enter the proxy URL.'; return 2; }
     python3 "$repo_dir/scripts/direct_egress.py" configure || return
   fi
   if ! python3 "$repo_dir/scripts/direct_egress.py" check; then

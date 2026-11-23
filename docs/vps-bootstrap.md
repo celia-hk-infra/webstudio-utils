@@ -71,7 +71,8 @@ Clone the same branch, then run:
 source shell/init.sh
 ```
 
-Paste the private proxy URL at the hidden prompt. Setup stores it with mode
+Paste the private proxy URL at the visible prompt so you can check the pasted
+text. The password will be visible in your terminal; keep it private. Setup stores it with mode
 600, checks connectivity, and installs the local GOST client. Omit
 `--skip-vscode` if you also want the separate VS Code tunnel setup.
 
